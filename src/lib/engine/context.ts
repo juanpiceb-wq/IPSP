@@ -1,4 +1,4 @@
-import type {
+﻿import type {
   Catalog,
   MainService,
   Parity,
@@ -187,10 +187,18 @@ export function blockingReason(
   }
 
   const pos = cyclePosition(weekday, ctx.arrival);
-  if (recipe.base_ingredient === "Plátano verde" && recipe.id !== ctx.sundayLunchRecipeId && pos > RULES.GREEN_PLANTAIN_DAYS)
-    return `El plátano verde debe utilizarse dentro de los primeros ${RULES.GREEN_PLANTAIN_DAYS} días después de recepción.`;
-  if (recipe.base_ingredient === "Plátano maduro" && pos <= RULES.GREEN_PLANTAIN_DAYS)
-    return "Las preparaciones con plátano maduro se programan después del período de uso de verde.";
+  const greenPlantain = usesGreenPlantain(recipe);
+  const ripePlantain = usesRipePlantain(recipe);
+
+  // Ciclo operativo vigente:
+  // día 1-3 después de la recepción = verde;
+  // desde el día 4 = maduro.
+  // El ceviche dominical conserva la excepción de chifle reservado/procesado
+  // dentro de la ventana válida de verde.
+  if (greenPlantain && recipe.id !== ctx.sundayLunchRecipeId && pos > RULES.GREEN_PLANTAIN_DAYS)
+    return `Las preparaciones con verde solo pueden programarse en los primeros ${RULES.GREEN_PLANTAIN_DAYS} días del ciclo después de recepción.`;
+  if (ripePlantain && pos <= RULES.GREEN_PLANTAIN_DAYS)
+    return `Las preparaciones con maduro solo pueden programarse desde el día ${RULES.GREEN_PLANTAIN_DAYS + 1} del ciclo después de recepción.`;
 
   return null;
 }
@@ -263,6 +271,24 @@ function normalize(value: string) {
     .toLowerCase();
 }
 
+function usesGreenPlantain(recipe: Recipe) {
+  if (recipe.base_ingredient === "Plátano verde") return true;
+  const text = normalize(`${recipe.name} ${recipe.base_ingredient ?? ""}`);
+  return /\bverde\b/.test(text)
+    || /\bpatacon(?:es)?\b/.test(text)
+    || /\bbolon\b/.test(text)
+    || /\btigrillo\b/.test(text)
+    || /\bcorviche\b/.test(text)
+    || /\bchifle(?:s)?\b/.test(text);
+}
+
+function usesRipePlantain(recipe: Recipe) {
+  if (recipe.base_ingredient === "Plátano maduro") return true;
+  const text = normalize(`${recipe.name} ${recipe.base_ingredient ?? ""}`);
+  return /\bmaduro(?:s)?\b/.test(text)
+    || /\btajada(?:s)? de maduro\b/.test(text);
+}
+
 export function isMeaningfulBase(base: string | null | undefined) {
   return !!base && base !== "Sin base dominante" && base !== "Arroz especial";
 }
@@ -292,3 +318,5 @@ export function makeRng(seed: string) {
 }
 
 export const MAIN_SERVICE_ORDER: MainService[] = ["breakfast", "lunch", "dinner"];
+
+

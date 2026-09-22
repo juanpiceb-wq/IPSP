@@ -224,3 +224,11 @@ Para volver a cargar el catálogo desde una versión nueva del Excel: exportar l
 
 *Master User: Juan Pablo Ceballos*
 
+
+### Maduración de plátano por ciclo de recepción
+
+- El ciclo real inicia el día siguiente a la recepción de víveres.
+- Días 1 a 3: preparaciones con verde.
+- Desde el día 4: preparaciones con maduro.
+- El ceviche dominical con chifle conserva la excepción operativa de verde reservado/procesado dentro de la ventana válida.
+- La regla se aplica también cuando "verde", "maduro", "patacón", "bolón", "tigrillo", "corviche" o "chifle" aparece como parte del nombre del plato y no como base dominante.

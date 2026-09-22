@@ -9,7 +9,7 @@ export const RULES = {
   PORK_EXCEPTIONS_ALLOWED: 1,
   HISTORY_WEEKS: 8,
   MAX_DAILY_DIFFICULTY: 6,
-  GREEN_PLANTAIN_DAYS: 4,
+  GREEN_PLANTAIN_DAYS: 3,
   MIN_PROTEIN_GAP_DAYS: 1,
 } as const;
 
@@ -65,4 +65,5 @@ export function cycleOrder(arrival: Weekday): Weekday[] {
 }
 
 export const SUNDAY_PREFERRED_PROTEINS = ["pollo", "lomo-cerdo", "estofado-res"];
+
 
