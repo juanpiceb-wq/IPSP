@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --c-navy-900:#06233f; --c-navy-800:#0b3154; --c-navy-700:#10456f;
+  --c-corp-700:#07518f; --c-corp-600:#0a67ad; --c-corp-500:#1682c5; --c-corp-400:#49a4dc;
+  --c-corp-300:#8bc8ea; --c-corp-200:#c8e4f5; --c-corp-100:#edf6fb;
+  --c-white:#fff; --c-shell:#f5f7f8; --c-line:#dfe6eb; --c-ink:#1f2b36; --c-muted:#6d7f8d;
+  --font-sans:"Segoe UI",system-ui,-apple-system,Arial,sans-serif;
+}
+html,body{background:var(--c-shell);color:var(--c-ink)}
+@layer components {
+  .surface{@apply rounded-xl border border-line bg-white;box-shadow:0 1px 2px rgba(6,35,63,.04)}
+  .card{@apply surface}
+  .page-pad{@apply p-6 lg:p-7}
+  .btn{@apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-45}
+  .btn-primary{@apply btn bg-corp-600 text-white hover:bg-corp-700}
+  .btn-dark{@apply btn bg-navy-800 text-white hover:bg-navy-900}
+  .btn-ghost{@apply btn border border-line bg-white text-navy-800 hover:border-corp-300 hover:bg-corp-100}
+  .btn-tertiary{@apply inline-flex items-center rounded-md px-2.5 py-1.5 text-xs font-semibold text-corp-700 hover:bg-corp-100}
+  .btn-danger-ghost{@apply inline-flex items-center justify-center rounded-md px-2.5 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50}
+  .btn-sm{@apply rounded-md px-2.5 py-1.5 text-xs}
+  .label{@apply mb-1.5 block text-[11px] font-semibold uppercase tracking-[.08em] text-muted}
+  .input{@apply w-full rounded-lg border border-line bg-white px-3 py-2.5 text-sm text-ink outline-none transition focus:border-corp-500 focus:ring-2 focus:ring-corp-200}
+  .badge{@apply inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold}
+  .chip{@apply inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold}
+  .chip-info{@apply chip bg-corp-100 text-corp-700}
+  .chip-dark{@apply chip bg-navy-800 text-white}
+  .chip-muted{@apply chip bg-slate-100 text-slate-600}
+  .th{@apply bg-navy-800 px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[.08em] text-white}
+  .td{@apply border-b border-line px-3 py-2.5 align-top text-sm}
+  .section-title{@apply text-[10.5px] font-semibold uppercase tracking-[.18em] text-corp-600}
+  .kpi-card{@apply rounded-xl border border-line bg-shell px-4 py-3}
+  .hero-strip{@apply surface flex flex-wrap items-center justify-between gap-4 p-5}
+  .empty-state{@apply surface flex min-h-[320px] flex-col items-center justify-center p-8 text-center}
+  .empty-state h2{@apply mt-3 text-lg font-semibold text-navy-900}.empty-state p{@apply mt-1 max-w-lg text-sm text-muted}.empty-icon{@apply flex h-10 w-10 items-center justify-center rounded-full bg-corp-100 text-2xl text-corp-600}
+  .notice-warn{@apply rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900}
+  .notice-error{@apply rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800}
+  .status-dot{@apply h-2.5 w-2.5 shrink-0 rounded-full}
+  .rank-dot{@apply flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold}
+  .exec-cell{@apply border-b border-r border-line bg-white px-2.5 py-2 align-top transition}
+  .exec-badge{@apply inline-flex w-fit rounded-full px-2 py-0.5 text-[10px] font-semibold}.exec-ok{@apply bg-emerald-100 text-emerald-700}.exec-bad{@apply bg-red-100 text-red-700}.exec-pending{@apply bg-slate-100 text-slate-500}
+  .compliance-choice{@apply rounded-xl border p-5 text-center text-base font-semibold transition}.compliance-ok{@apply border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100}.compliance-bad{@apply border-red-200 bg-red-50 text-red-800 hover:bg-red-100}
+}
+.watermark{position:fixed;right:14px;bottom:10px;z-index:40;font-size:10.5px;letter-spacing:.02em;color:#0b2e4f;opacity:.22;pointer-events:none;user-select:none}
+@media print{.no-print{display:none!important}body{background:#fff}.print-full{width:100%!important;margin:0!important;padding:0!important}.watermark{position:fixed;opacity:.16;font-size:8px}.surface,.card{box-shadow:none!important}@page{size:A4 landscape;margin:10mm}}
+
+@layer components {
+  .planner-grid{display:grid;grid-template-columns:repeat(7,minmax(170px,1fr));gap:10px}
+  .planner-day{@apply overflow-hidden rounded-xl border border-line bg-white}
+  .planner-day-head{@apply flex items-center justify-between border-b border-line bg-shell px-3 py-2 text-sm text-navy-900}
+  .planner-meal{@apply border-b border-line p-2.5 last:border-b-0}
+  .planner-meal-title{@apply mb-2 text-[10px] font-bold uppercase tracking-[.12em] text-corp-600}
+  .food-card{@apply rounded-lg border border-line bg-white p-2.5 transition hover:border-corp-300}
+  .mini-food{@apply rounded-lg border border-line bg-shell/60 p-2}
+}

@@ -1,0 +1,308 @@
+import type { Catalog, MenuItem, MenuMetrics, Parity, ValidationIssue, Weekday, WeeklyMenu } from "../types";
+import { RULES, allowedBeverages, cycleOrder } from "../rules";
+import { WEEKDAYS } from "../types";
+import { addConsumption, availableQuantity, inventorySummary, recipeConsumptions } from "../supply";
+import { blockingReason, buildContext, buildHistoryIndex, isMeaningfulBase, recencyWeight } from "./context";
+
+export interface ValidateInput {
+  items: MenuItem[];
+  catalog: Catalog;
+  parity: Parity;
+  arrival: Weekday;
+  year: number;
+  week: number;
+  campId: string;
+  diners: number;
+  history: WeeklyMenu[];
+}
+
+export interface ValidationResult {
+  issues: ValidationIssue[];
+  metrics: MenuMetrics;
+  unmetTargets: { name: string; target: number; assigned: number }[];
+}
+
+export function validateMenu(input: ValidateInput): ValidationResult {
+  const { items, catalog, parity } = input;
+  const hist = buildHistoryIndex(input.history, input.year, input.week, input.campId, catalog);
+  const ctx = buildContext(catalog, parity, input.arrival, hist);
+  const issues: ValidationIssue[] = [];
+  const mains = items.filter((i) => i.component === "main");
+  const soups = items.filter((i) => i.component === "soup");
+  const lunchDinner = mains.filter((i) => i.service === "lunch" || i.service === "dinner");
+
+  const mainSlotKeys = new Set(mains.filter((i) => i.recipe_id).map((i) => `${i.weekday}|${i.service}`));
+  const expectedMainKeys = WEEKDAYS.flatMap((d) => ["breakfast", "lunch", "dinner"].map((s) => `${d.value}|${s}`));
+  const missingMainSlots = expectedMainKeys.filter((k) => !mainSlotKeys.has(k));
+  issues.push(missingMainSlots.length
+    ? { level: "error", rule: "completo", message: `${missingMainSlots.length} plato(s) fuerte(s) sin preparación asignada.` }
+    : { level: "ok", rule: "completo", message: "Los 21 platos fuertes están asignados." });
+
+  const soupDays = new Set(soups.filter((i) => i.recipe_id).map((i) => i.weekday));
+  const requiredSoupDays = WEEKDAYS.filter((d) => d.value !== 6);
+  const missingSoups = requiredSoupDays.filter((d) => !soupDays.has(d.value));
+  const sundaySoup = soups.find((i) => i.weekday === 6 && i.recipe_id);
+  if (sundaySoup) {
+    issues.push({ level: "error", rule: "domingo-sin-sopa", message: "El domingo no se sirve sopa; retire la sopa del almuerzo dominical.", weekday: 6, service: "lunch" });
+  }
+  issues.push(missingSoups.length
+    ? { level: "error", rule: "sopa-almuerzo", message: `${missingSoups.length} almuerzo(s) de lunes a sábado sin sopa.` }
+    : { level: "ok", rule: "sopa-almuerzo", message: "Los almuerzos de lunes a sábado tienen sopa; domingo no lleva sopa." });
+
+  let invalid = 0;
+  for (const it of items) {
+    if (!it.recipe_id) continue;
+    const recipe = ctx.recipesById.get(it.recipe_id);
+    if (!recipe) {
+      invalid++;
+      issues.push({ level: "error", rule: "receta", message: "Hay una preparación que ya no existe en el catálogo.", weekday: it.weekday, service: it.service });
+      continue;
+    }
+    const service = it.component === "soup" ? "soup" : it.service;
+    const reason = blockingReason(recipe, service, it.weekday, ctx);
+    if (reason) {
+      invalid++;
+      issues.push({ level: "error", rule: "restriccion", message: `${WEEKDAYS[it.weekday].label} · ${labelOf(it)}: ${reason}`, weekday: it.weekday, service: it.service });
+    }
+    if (it.salad_recipe_id) {
+      const salad = ctx.recipesById.get(it.salad_recipe_id);
+      const sreason = salad ? blockingReason(salad, "salad", it.weekday, ctx) : "Ensalada inexistente.";
+      if (sreason) {
+        invalid++;
+        issues.push({ level: "error", rule: "restriccion", message: `${WEEKDAYS[it.weekday].label} · ${labelOf(it)} (ensalada): ${sreason}`, weekday: it.weekday, service: it.service });
+      }
+    }
+  }
+  if (!invalid) issues.push({ level: "ok", rule: "restriccion", message: "Todas las preparaciones respetan servicio, paridad, domingo, doble fritura y maduración." });
+
+  // Domingo fijo / asado: validación explícita para mensajes claros.
+  const sundayLunch = mains.find((i) => i.weekday === 6 && i.service === "lunch");
+  if (ctx.sundayLunchRecipeId && sundayLunch?.recipe_id !== ctx.sundayLunchRecipeId)
+    issues.push({ level: "error", rule: "domingo-almuerzo", message: "El almuerzo del domingo debe ser Ceviche de pescado con chifle." });
+  else if (ctx.sundayLunchRecipeId) issues.push({ level: "ok", rule: "domingo-almuerzo", message: "Almuerzo dominical fijo correcto: Ceviche de pescado con chifle." });
+
+  const sundayDinner = mains.find((i) => i.weekday === 6 && i.service === "dinner");
+  const sundayDinnerRecipe = sundayDinner?.recipe_id ? ctx.recipesById.get(sundayDinner.recipe_id) : null;
+  if (sundayDinnerRecipe && !sundayDinnerRecipe.sunday_roast)
+    issues.push({ level: "error", rule: "domingo-cena", message: "La cena del domingo debe ser una preparación asada habilitada." });
+
+  // Proteína repetida el mismo día.
+  let repeated = 0;
+  for (const day of WEEKDAYS) {
+    const dayMains = mains.filter((i) => i.weekday === day.value && i.protein_id);
+    const seen = new Set<string>();
+    for (const it of dayMains) {
+      if (seen.has(it.protein_id!)) {
+        repeated++;
+        issues.push({ level: "error", rule: "proteina-dia", message: `${day.label}: ${ctx.proteinsById.get(it.protein_id!)?.name ?? it.protein_id} se repite dos veces el mismo día.`, weekday: day.value });
+      }
+      seen.add(it.protein_id!);
+    }
+  }
+  if (!repeated) issues.push({ level: "ok", rule: "proteina-dia", message: "Ninguna proteína se repite dos veces el mismo día." });
+
+  // Separación mínima entre usos de la misma proteína/producto.
+  // Aplica sin importar el servicio: debe existir al menos 1 día completo de por medio.
+  // La secuencia se valida según el ciclo real del campamento (día posterior a recepción).
+  let adjacentProteinRepeats = 0;
+  const orderedDays = cycleOrder(input.arrival);
+  const cyclePos = new Map<Weekday, number>(orderedDays.map((d, i) => [d, i]));
+  const byProtein = new Map<string, Set<Weekday>>();
+  for (const it of items) {
+    if (!it.recipe_id || !it.protein_id) continue;
+    const set = byProtein.get(it.protein_id) ?? new Set<Weekday>();
+    set.add(it.weekday);
+    byProtein.set(it.protein_id, set);
+  }
+  for (const [proteinId, daySet] of byProtein) {
+    const days = [...daySet].sort((a, b) => (cyclePos.get(a) ?? 0) - (cyclePos.get(b) ?? 0));
+    for (let i = 1; i < days.length; i++) {
+      const prev = days[i - 1];
+      const curr = days[i];
+      const distance = (cyclePos.get(curr) ?? 0) - (cyclePos.get(prev) ?? 0);
+      if (distance <= RULES.MIN_PROTEIN_GAP_DAYS) {
+        adjacentProteinRepeats++;
+        issues.push({
+          level: "error",
+          rule: "proteina-consecutiva",
+          message: `${WEEKDAYS[prev].label} → ${WEEKDAYS[curr].label}: ${ctx.proteinsById.get(proteinId)?.name ?? proteinId} requiere al menos 1 día completo de por medio antes de repetirse.`,
+          weekday: curr,
+        });
+      }
+    }
+  }
+  if (!adjacentProteinRepeats) issues.push({ level: "ok", rule: "proteina-consecutiva", message: "Todas las proteínas tienen al menos 1 día completo de separación antes de repetirse." });
+
+  // Origen animal: preferencia, con una excepción semanal para cerdo.
+  let porkExceptions = 0;
+  for (const day of WEEKDAYS) {
+    const origins = mains.filter((i) => i.weekday === day.value && i.protein_id)
+      // Chorizo es neutro para la regla de origen animal: no cuenta como cerdo ni como otro origen.
+      .map((i) => {
+        const protein = ctx.proteinsById.get(i.protein_id!);
+        return protein && protein.id !== "chorizo" ? protein.origin : null;
+      }).filter(Boolean) as string[];
+    const counts = new Map<string, number>();
+    origins.forEach((o) => counts.set(o, (counts.get(o) ?? 0) + 1));
+    for (const [origin, n] of counts) {
+      if (n <= 1) continue;
+      if (origin === "cerdo") porkExceptions += n - 1;
+      else issues.push({ level: "error", rule: "origen-dia", message: `${day.label}: se repite origen ${origin} en dos platos fuertes. Solo se admite una excepción semanal de origen cerdo.`, weekday: day.value });
+    }
+  }
+  if (porkExceptions > RULES.PORK_EXCEPTIONS_ALLOWED)
+    issues.push({ level: "error", rule: "excepcion-cerdo", message: `${porkExceptions} repeticiones de origen cerdo; solo se permite ${RULES.PORK_EXCEPTIONS_ALLOWED} excepción por semana.` });
+  else if (porkExceptions) issues.push({ level: "warn", rule: "excepcion-cerdo", message: `${porkExceptions} excepción de origen cerdo utilizada.` });
+
+  // Dificultad diaria máxima 6.
+  let maxDailyDifficulty = 0;
+  for (const day of WEEKDAYS) {
+    const total = mains.filter((i) => i.weekday === day.value && i.recipe_id)
+      .reduce((sum, i) => sum + (ctx.recipesById.get(i.recipe_id!)?.difficulty ?? 1), 0);
+    maxDailyDifficulty = Math.max(maxDailyDifficulty, total);
+    if (total > RULES.MAX_DAILY_DIFFICULTY)
+      issues.push({ level: "error", rule: "dificultad-dia", message: `${day.label}: dificultad total ${total}; máximo permitido ${RULES.MAX_DAILY_DIFFICULTY}.`, weekday: day.value });
+  }
+  if (maxDailyDifficulty <= RULES.MAX_DAILY_DIFFICULTY)
+    issues.push({ level: "ok", rule: "dificultad-dia", message: `Carga de cocina controlada: ningún día supera dificultad ${RULES.MAX_DAILY_DIFFICULTY}.` });
+
+  // Ingrediente base no consecutivo.
+  let baseRepeats = 0;
+  for (let d = 0; d < 6; d++) {
+    const left = new Set(mains.filter((i) => i.weekday === d && i.recipe_id)
+      .map((i) => ctx.recipesById.get(i.recipe_id!)?.base_ingredient)
+      .filter((b): b is string => isMeaningfulBase(b)));
+    const right = new Set(mains.filter((i) => i.weekday === d + 1 && i.recipe_id)
+      .map((i) => ctx.recipesById.get(i.recipe_id!)?.base_ingredient)
+      .filter((b): b is string => isMeaningfulBase(b)));
+    for (const b of left) if (right.has(b)) {
+      baseRepeats++;
+      issues.push({ level: "error", rule: "base-consecutiva", message: `${WEEKDAYS[d].label} → ${WEEKDAYS[d + 1].label}: se repite el ingrediente base ${b}.` });
+    }
+  }
+  if (!baseRepeats) issues.push({ level: "ok", rule: "base-consecutiva", message: "No se repiten ingredientes base dominantes en días consecutivos." });
+
+  // Ensaladas.
+  const saladCount = lunchDinner.filter((i) => i.recipe_id && i.salad_recipe_id).length;
+  if (saladCount < RULES.SALAD_MIN) {
+    issues.push({ level: "error", rule: "ensaladas", message: `${saladCount}/${RULES.SALAD_SERVICES} servicios con ensalada. Se requieren ${RULES.SALAD_TARGET}.` });
+  } else if (saladCount > RULES.SALAD_TARGET) {
+    issues.push({ level: "warn", rule: "ensaladas", message: `${saladCount}/${RULES.SALAD_SERVICES} servicios con ensalada. La generación automática trabaja con ${RULES.SALAD_TARGET}; priorice omitirla en platos dificultad 3.` });
+  } else {
+    issues.push({ level: "ok", rule: "ensaladas", message: `${saladCount}/${RULES.SALAD_SERVICES} almuerzos y cenas con ensalada. Los platos D3 pueden ir sin ensalada.` });
+  }
+
+  // Bebidas permitidas por servicio/paridad.
+  const badBeverage = mains.filter((i) => !i.beverage || !allowedBeverages(i.service, parity).includes(i.beverage));
+  if (badBeverage.length)
+    issues.push({ level: "error", rule: "bebidas", message: `${badBeverage.length} servicio(s) tienen una bebida no permitida para servicio/paridad.` });
+  else issues.push({ level: "ok", rule: "bebidas", message: "Bebidas correctas por servicio y paridad." });
+
+  issues.push({ level: "ok", rule: "arroz", message: "Arroz obligatorio en desayuno, almuerzo y cena; se agrega automáticamente salvo preparaciones con arroz integrado." });
+
+  // Máximos semanales.
+  const uses = new Map<string, number>();
+  for (const it of items) if (it.protein_id) uses.set(it.protein_id, (uses.get(it.protein_id) ?? 0) + 1);
+  let frequencyOverages = 0;
+  for (const p of catalog.proteins) {
+    if (!p.active || p.target_frequency <= 0 || (p.parity !== "todas" && p.parity !== parity)) continue;
+    const assigned = uses.get(p.id) ?? 0;
+    if (assigned > p.target_frequency) {
+      frequencyOverages++;
+      issues.push({ level: "error", rule: "frecuencia", message: `${p.name}: máximo ${p.target_frequency} por semana · asignadas ${assigned}.` });
+    }
+  }
+  if (!frequencyOverages) issues.push({ level: "ok", rule: "frecuencia", message: "Todas las proteínas respetan su máximo semanal configurado." });
+
+  // Stock semanal conocido. Solo compara unidades compatibles del maestro.
+  const ledger = new Map<string, number>();
+  for (const it of items) {
+    if (!it.recipe_id) continue;
+    const r = ctx.recipesById.get(it.recipe_id);
+    if (r) addConsumption(ledger, r, input.diners);
+  }
+  let stockErrors = 0;
+  for (const row of inventorySummary(ledger, input.diners)) {
+    if (row.used > row.cap + 1e-9) {
+      stockErrors++;
+      issues.push({ level: "error", rule: "stock", message: `${row.label}: consumo ${round(row.used)} ${row.unit} > disponible ${round(row.cap)} ${row.unit}.` });
+    }
+  }
+  if (!stockErrors) issues.push({ level: "ok", rule: "stock", message: "El menú no excede los stocks semanales cuantificables del cuadro de víveres." });
+
+  const menuComplete = missingMainSlots.length === 0 && missingSoups.length === 0 && !sundaySoup;
+  const variety = menuComplete ? varietyScore(items, ctx.history, ctx.recipesById) : 0;
+  if (!menuComplete)
+    issues.push({ level: "warn", rule: "variedad", message: "La variedad no se califica hasta completar los 21 platos fuertes y las 6 sopas de lunes a sábado." });
+  else
+    issues.push({ level: variety >= 80 ? "ok" : "warn", rule: "variedad", message: `Variedad respecto a las últimas ${RULES.HISTORY_WEEKS} semanas: ${variety}%.` });
+
+  const errors = issues.filter((i) => i.level === "error").length;
+  const warnings = issues.filter((i) => i.level === "warn").length;
+  const compliance = Math.max(0, Math.round(100 - errors * 12 - warnings * 3));
+  const inventoryRows = inventorySummary(ledger, input.diners);
+  const inventoryUsePct = inventoryRows.length ? Math.round(inventoryRows.reduce((s, x) => s + Math.min(100, x.pct), 0) / inventoryRows.length) : 0;
+
+  const metrics: MenuMetrics = {
+    mainCount: mains.filter((i) => i.recipe_id).length,
+    soupCount: soups.filter((i) => i.recipe_id).length,
+    saladCount,
+    saladTarget: RULES.SALAD_TARGET,
+    errors,
+    warnings,
+    varietyScore: variety,
+    complianceScore: compliance,
+    porkExceptions,
+    maxDailyDifficulty,
+    inventoryUsePct,
+  };
+  const unmetTargets = catalog.proteins
+    .filter((p) => p.active && !p.soup_only && p.target_frequency > 0 && (p.parity === "todas" || p.parity === parity))
+    .map((p) => ({ name: p.name, target: p.target_frequency, assigned: mains.filter((i) => i.protein_id === p.id).length }))
+    .filter((x) => x.assigned < x.target);
+  return { issues, metrics, unmetTargets };
+}
+
+function labelOf(it: MenuItem) {
+  if (it.component === "soup") return "sopa";
+  return it.service === "breakfast" ? "desayuno" : it.service === "lunch" ? "almuerzo" : "cena";
+}
+
+export function varietyScore(
+  items: MenuItem[],
+  history: ReturnType<typeof buildHistoryIndex>,
+  recipesById?: Map<string, { base_ingredient?: string | null }>
+): number {
+  const relevant = items.filter((i) => i.recipe_id);
+  if (!relevant.length) return 0;
+  let penalty = 0;
+  for (const it of relevant) {
+    const rAgo = history.recipeAgo.get(it.recipe_id!);
+    penalty += recencyWeight(rAgo) * (rAgo === 1 ? 1.35 : 1);
+    penalty += recencyWeight(history.recipeSlotAgo.get(`${it.recipe_id}|${it.weekday}|${it.service}|${it.component}`)) * 0.8;
+    if (it.protein_id) penalty += recencyWeight(history.proteinSlotAgo.get(`${it.protein_id}|${it.weekday}|${it.service}`)) * 0.5;
+    const base = recipesById?.get(it.recipe_id!)?.base_ingredient;
+    if (isMeaningfulBase(base)) penalty += recencyWeight(history.baseAgo.get(base!)) * 0.35;
+  }
+  const max = relevant.length * 3;
+  return Math.max(0, Math.round(100 - (penalty / max) * 100));
+}
+
+export function menuStockReason(items: MenuItem[], candidate: { recipe_id: string | null }, catalog: Catalog, diners: number) {
+  if (!candidate.recipe_id) return null;
+  const recipe = catalog.recipes.find((r) => r.id === candidate.recipe_id);
+  if (!recipe) return null;
+  const ledger = new Map<string, number>();
+  for (const it of items) {
+    if (!it.recipe_id) continue;
+    const r = catalog.recipes.find((x) => x.id === it.recipe_id);
+    if (r) addConsumption(ledger, r, diners);
+  }
+  for (const c of recipeConsumptions(recipe, diners)) {
+    const cap = availableQuantity(c.key, diners);
+    if (cap != null && (ledger.get(c.key) ?? 0) + c.quantity > cap + 1e-9) return `${c.label} excedería el stock semanal.`;
+  }
+  return null;
+}
+
+function round(v: number) { return Math.round(v * 100) / 100; }
