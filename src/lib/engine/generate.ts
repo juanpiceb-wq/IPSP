@@ -1,5 +1,5 @@
-import type { Catalog, MainService, MenuItem, Parity, Recipe, Weekday, WeeklyMenu } from "../types";
-import { RULES, SUNDAY_PREFERRED_PROTEINS, STATIC_BEVERAGE_LABELS, cycleOrder } from "../rules";
+﻿import type { Catalog, MainService, MenuItem, Parity, Recipe, Weekday, WeeklyMenu } from "../types";
+import { RULES, SUNDAY_PREFERRED_PROTEINS, beverageLabel, cycleOrder } from "../rules";
 import { addConsumption, canConsume } from "../supply";
 import {
   EngineContext,
@@ -88,8 +88,9 @@ function generateMenuAttempt(input: GenerateInput, seed: string): GenerateOutput
       initial.proteinUses.set(it.protein_id, (initial.proteinUses.get(it.protein_id) ?? 0) + 1);
       if (it.component === "main") {
         addDay(initial.dayProteins, it.weekday, it.protein_id);
-        const origin = ctx.proteinsById.get(it.protein_id)?.origin;
-        if (origin) pushOrigin(initial.dayOrigins, it.weekday, origin);
+        const selectedProtein = ctx.proteinsById.get(it.protein_id);
+        if (selectedProtein && selectedProtein.id !== "chorizo")
+          pushOrigin(initial.dayOrigins, it.weekday, selectedProtein.origin);
       }
     }
     if (it.salad_recipe_id) initial.usedRecipes.add(it.salad_recipe_id);
@@ -128,7 +129,7 @@ function generateMenuAttempt(input: GenerateInput, seed: string): GenerateOutput
     for (const service of MAIN_SERVICE_ORDER) {
       const k = key(weekday, service, "main");
       if (!items.some((i) => key(i.weekday, i.service, i.component) === k))
-        items.push(makeItem(weekday, service, "main", null, STATIC_BEVERAGE_LABELS[service]));
+        items.push(makeItem(weekday, service, "main", null, beverageLabel(service, input.parity)));
     }
     if (weekday !== 6) {
       const sk = key(weekday, "lunch", "soup");
@@ -231,7 +232,7 @@ function searchSlots(
       slot.service,
       cfg.component,
       cand,
-      cfg.component === "main" ? STATIC_BEVERAGE_LABELS[slot.service] : null
+      cfg.component === "main" ? beverageLabel(slot.service, cfg.input.parity) : null
     ));
 
     const solved = searchSlots(next, slots, index + 1, cfg);
@@ -307,7 +308,7 @@ function candidateList(a: PickArgs): Candidate[] {
     if (a.component === "main") {
       const difficulty = recipe.difficulty ?? 1;
       if (dayDifficulty(a.items, a.weekday, a.ctx) + difficulty > RULES.MAX_DAILY_DIFFICULTY) continue;
-      if (hasAdjacentBase(a.items, a.weekday, recipe.base_ingredient, a.ctx)) continue;
+      if (hasAdjacentBase(a.items, a.weekday, recipe.base_ingredient, a.ctx, a.arrival)) continue;
     }
 
     const stockReason = canConsume(a.ledger, recipe, a.diners);
@@ -452,12 +453,20 @@ function violatesProteinGap(items: MenuItem[], weekday: Weekday, proteinId: stri
   return gap <= RULES.MIN_PROTEIN_GAP_DAYS;
 }
 
-function hasAdjacentBase(items: MenuItem[], weekday: Weekday, base: string | null | undefined, ctx: EngineContext) {
+function hasAdjacentBase(
+  items: MenuItem[],
+  weekday: Weekday,
+  base: string | null | undefined,
+  ctx: EngineContext,
+  arrival: Weekday
+) {
   if (!isMeaningfulBase(base)) return false;
-  const prev = weekday > 0 ? ((weekday - 1) as Weekday) : null;
-  const next = weekday < 6 ? ((weekday + 1) as Weekday) : null;
+  const order = cycleOrder(arrival);
+  const current = order.indexOf(weekday);
   return items.some((i) => {
-    if (i.component !== "main" || !i.recipe_id || (i.weekday !== prev && i.weekday !== next)) return false;
+    if (i.component !== "main" || !i.recipe_id) return false;
+    const other = order.indexOf(i.weekday);
+    if (other < 0 || Math.abs(other - current) !== 1) return false;
     return ctx.recipesById.get(i.recipe_id)?.base_ingredient === base;
   });
 }
@@ -569,3 +578,9 @@ export function sortItems(a: MenuItem, b: MenuItem) {
   const rb = SERVICE_RANK[b.service] * 2 + (b.component === "soup" ? -1 : 0);
   return ra - rb;
 }
+
+
+
+
+
+

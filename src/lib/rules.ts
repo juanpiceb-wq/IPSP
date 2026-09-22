@@ -1,4 +1,4 @@
-import type { MainService, Parity, Weekday } from "./types";
+﻿import type { MainService, Parity, Weekday } from "./types";
 
 export const RULES = {
   MAIN_SLOTS: 21,
@@ -24,9 +24,19 @@ export const STATIC_BEVERAGE_LABELS: Record<MainService, string> = {
   dinner: "Jugo en Polvo / Café",
 };
 
-/** Las bebidas se muestran como opciones estáticas por servicio; no se randomizan. */
-export function allowedBeverages(service: MainService, _parity: Parity): string[] {
-  return [STATIC_BEVERAGE_LABELS[service]];
+const ODD_WEEK_BEVERAGE_LABELS: Record<MainService, string> = {
+  breakfast: "Café / Chocolatada / Aromática",
+  lunch: "Jugo de Pulpa",
+  dinner: "Jugo en Polvo / Café",
+};
+
+/** Las bebidas son estáticas por servicio. Quaker solo está disponible en semana par. */
+export function beverageLabel(service: MainService, parity: Parity): string {
+  return parity === "par" ? STATIC_BEVERAGE_LABELS[service] : ODD_WEEK_BEVERAGE_LABELS[service];
+}
+
+export function allowedBeverages(service: MainService, parity: Parity): string[] {
+  return [beverageLabel(service, parity)];
 }
 
 export function parityOfWeek(week: number): Parity {
@@ -55,3 +65,4 @@ export function cycleOrder(arrival: Weekday): Weekday[] {
 }
 
 export const SUNDAY_PREFERRED_PROTEINS = ["pollo", "lomo-cerdo", "estofado-res"];
+

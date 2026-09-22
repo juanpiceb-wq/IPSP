@@ -1,4 +1,4 @@
-import type { Catalog, MenuItem, MenuMetrics, Parity, ValidationIssue, Weekday, WeeklyMenu } from "../types";
+﻿import type { Catalog, MenuItem, MenuMetrics, Parity, ValidationIssue, Weekday, WeeklyMenu } from "../types";
 import { RULES, allowedBeverages, cycleOrder } from "../rules";
 import { WEEKDAYS } from "../types";
 import { addConsumption, availableQuantity, inventorySummary, recipeConsumptions } from "../supply";
@@ -166,18 +166,21 @@ export function validateMenu(input: ValidateInput): ValidationResult {
   if (maxDailyDifficulty <= RULES.MAX_DAILY_DIFFICULTY)
     issues.push({ level: "ok", rule: "dificultad-dia", message: `Carga de cocina controlada: ningún día supera dificultad ${RULES.MAX_DAILY_DIFFICULTY}.` });
 
-  // Ingrediente base no consecutivo.
+  // Ingrediente base no consecutivo según el ciclo real de abastecimiento.
   let baseRepeats = 0;
-  for (let d = 0; d < 6; d++) {
-    const left = new Set(mains.filter((i) => i.weekday === d && i.recipe_id)
+  const baseOrder = cycleOrder(input.arrival);
+  for (let pos = 0; pos < baseOrder.length - 1; pos++) {
+    const leftDay = baseOrder[pos];
+    const rightDay = baseOrder[pos + 1];
+    const left = new Set(mains.filter((i) => i.weekday === leftDay && i.recipe_id)
       .map((i) => ctx.recipesById.get(i.recipe_id!)?.base_ingredient)
       .filter((b): b is string => isMeaningfulBase(b)));
-    const right = new Set(mains.filter((i) => i.weekday === d + 1 && i.recipe_id)
+    const right = new Set(mains.filter((i) => i.weekday === rightDay && i.recipe_id)
       .map((i) => ctx.recipesById.get(i.recipe_id!)?.base_ingredient)
       .filter((b): b is string => isMeaningfulBase(b)));
     for (const b of left) if (right.has(b)) {
       baseRepeats++;
-      issues.push({ level: "error", rule: "base-consecutiva", message: `${WEEKDAYS[d].label} → ${WEEKDAYS[d + 1].label}: se repite el ingrediente base ${b}.` });
+      issues.push({ level: "error", rule: "base-consecutiva", message: `${WEEKDAYS[leftDay].label} → ${WEEKDAYS[rightDay].label}: se repite el ingrediente base ${b}.` });
     }
   }
   if (!baseRepeats) issues.push({ level: "ok", rule: "base-consecutiva", message: "No se repiten ingredientes base dominantes en días consecutivos." });
@@ -306,3 +309,4 @@ export function menuStockReason(items: MenuItem[], candidate: { recipe_id: strin
 }
 
 function round(v: number) { return Math.round(v * 100) / 100; }
+

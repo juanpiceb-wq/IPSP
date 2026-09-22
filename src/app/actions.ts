@@ -1,4 +1,4 @@
-"use server";
+﻿"use server";
 
 import { revalidatePath } from "next/cache";
 import { getRepo, newId, slugify } from "@/lib/db";
@@ -162,6 +162,22 @@ export async function actionSaveMenu(menu: {
     const existing = await repo.getMenu(menu.id);
     if (existing && menuStarted(existing)) throw new Error("La semana ya inició. El menú quedó bloqueado y solo admite registro de cumplimiento.");
   }
+  if (menu.status === "aprobado") {
+    const [catalog, history] = await Promise.all([repo.getCatalog(), repo.listMenus()]);
+    const validation = validateMenu({
+      items: menu.items,
+      catalog,
+      parity: parityOfWeek(menu.week),
+      arrival: menu.arrival,
+      year: menu.year,
+      week: menu.week,
+      campId: menu.campId,
+      diners: menu.diners,
+      history: history.filter((m) => m.id !== menu.id),
+    });
+    if (validation.metrics.errors > 0)
+      throw new Error(`El menú tiene ${validation.metrics.errors} error(es) críticos y no puede aprobarse.`);
+  }
   const record: WeeklyMenu = {
     id, year: menu.year, week_number: menu.week, parity: parityOfWeek(menu.week), camp_id: menu.campId,
     diners: menu.diners, supply_arrival_weekday: menu.arrival, actual_start_date: menu.start,
@@ -209,7 +225,26 @@ export async function actionSaveBulkMenus(req: {
 }
 
 export async function actionSetStatus(id: string, status: MenuStatus) {
-  await getRepo().setMenuStatus(id, status);
+  const repo = getRepo();
+  if (status === "aprobado") {
+    const [menu, catalog, history] = await Promise.all([repo.getMenu(id), repo.getCatalog(), repo.listMenus()]);
+    if (!menu) throw new Error("Menú no encontrado.");
+    if (menuStarted(menu)) throw new Error("La semana ya inició. El estado del menú está bloqueado.");
+    const validation = validateMenu({
+      items: menu.items,
+      catalog,
+      parity: parityOfWeek(menu.week_number),
+      arrival: menu.supply_arrival_weekday,
+      year: menu.year,
+      week: menu.week_number,
+      campId: menu.camp_id,
+      diners: menu.diners,
+      history: history.filter((m) => m.id !== menu.id),
+    });
+    if (validation.metrics.errors > 0)
+      throw new Error(`El menú tiene ${validation.metrics.errors} error(es) críticos y no puede aprobarse.`);
+  }
+  await repo.setMenuStatus(id, status);
   revalidatePath("/menus"); revalidatePath(`/menus/${id}`); revalidatePath("/");
 }
 
@@ -320,3 +355,5 @@ function menuStarted(menu: WeeklyMenu) {
 }
 
 function uniqueId(base: string) { return `${base || "item"}-${Math.random().toString(36).slice(2, 6)}`; }
+
+

@@ -1,4 +1,4 @@
-# Planificación de Alimentación · Menús semanales de campamentos
+﻿# Planificación de Alimentación · Menús semanales de campamentos
 
 Aplicación web para **generar, validar, editar, guardar y consultar los menús semanales**
 del servicio de alimentación de los campamentos, aplicando automáticamente las reglas del
@@ -13,7 +13,7 @@ historial e explicabilidad de cada selección.
 
 | Módulo | Estado |
 |---|---|
-| Generador de menú semanal (21 platos fuertes + 7 sopas + ensaladas + bebidas) | ✅ |
+| Generador de menú semanal (21 platos fuertes + 6 sopas (lunes a sábado) + ensaladas + bebidas) | ✅ |
 | Reglas duras (servicio, sopas, paridad, disponibilidad, arroz, ensaladas) | ✅ |
 | Preferencias con puntuación (frecuencias, variedad, origen animal, domingo) | ✅ |
 | Validación en tiempo real con mensajes en lenguaje claro | ✅ |
@@ -114,7 +114,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOi...
 3. Para cada uno de los 21 espacios de plato fuerte construye la lista de candidatos y
    **descarta por reglas duras**:
    - servicio permitido de la preparación;
-   - proteínas exclusivas (huevo, atún y sardina solo desayuno; hueso, costilla y pata solo sopa);
+   - proteínas exclusivas (huevo y atún solo desayuno; sardina solo almuerzo, excepto Corviche de sardina en desayuno; hueso, costilla y pata solo sopa);
    - paridad de la proteína y de cada producto restrictivo (todo fideo o pasta = semana par);
    - disponibilidad por día según el día de llegada del producto;
    - misma proteína ya usada ese día;
@@ -126,7 +126,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOi...
 5. Elige al azar entre los candidatos de mejor puntuación → cada generación es distinta
    pero siempre lógica. La **semilla** se guarda para reproducir una propuesta.
 6. Genera las 7 sopas con el mismo criterio (solo hueso carnudo, costilla o pata, o sin
-   proteína animal), asigna ensaladas apuntando a 11–12 de 14 (mínimo 10) y las bebidas.
+   proteína animal), asigna ensaladas apuntando a 10 de 14 (mínimo 10) y las bebidas.
 7. `src/lib/engine/validate.ts` vuelve a revisar todo el menú y produce el panel de validación.
 
 ### Frecuencias que exceden la capacidad
@@ -223,3 +223,4 @@ Para volver a cargar el catálogo desde una versión nueva del Excel: exportar l
 ---
 
 *Master User: Juan Pablo Ceballos*
+

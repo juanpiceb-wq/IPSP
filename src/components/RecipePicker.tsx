@@ -1,9 +1,9 @@
-"use client";
+﻿"use client";
 
 import { useMemo, useState } from "react";
 import { blockingReason, buildContext, isMeaningfulBase } from "@/lib/engine/context";
 import { menuStockReason } from "@/lib/engine/validate";
-import { RULES } from "@/lib/rules";
+import { RULES, cycleOrder } from "@/lib/rules";
 import type { Catalog, MenuItem, Parity, Recipe, Service, Weekday } from "@/lib/types";
 
 interface Props {
@@ -67,14 +67,28 @@ export default function RecipePicker({
             }
           }
           if (!dayReason && protein) {
-            const adjacent = withoutCurrent.some((i) => i.component === "main" && i.service === service && i.protein_id === protein.id && Math.abs(i.weekday - weekday) === 1);
-            if (adjacent) dayReason = `${protein.name} ya está programada en el día consecutivo dentro del mismo servicio.`;
+            const order = cycleOrder(arrival);
+            const current = order.indexOf(weekday);
+            const adjacent = withoutCurrent.some((i) => {
+              if (!i.recipe_id || i.protein_id !== protein.id) return false;
+              const other = order.indexOf(i.weekday);
+              return other >= 0 && Math.abs(other - current) <= RULES.MIN_PROTEIN_GAP_DAYS;
+            });
+            if (adjacent) dayReason = `${protein.name} requiere al menos 1 día completo de por medio antes de repetirse.`;
           }
           const difficulty = sameDayMains.reduce((sum, i) => sum + (i.recipe_id ? catalog.recipes.find((x) => x.id === i.recipe_id)?.difficulty ?? 1 : 0), 0) + (r.difficulty ?? 1);
           if (!dayReason && difficulty > RULES.MAX_DAILY_DIFFICULTY) dayReason = `La dificultad diaria subiría a ${difficulty}; máximo ${RULES.MAX_DAILY_DIFFICULTY}.`;
           if (!dayReason && isMeaningfulBase(r.base_ingredient)) {
-            const neighbor = withoutCurrent.find((i) => i.component === "main" && Math.abs(i.weekday - weekday) === 1 && i.recipe_id && catalog.recipes.find((x) => x.id === i.recipe_id)?.base_ingredient === r.base_ingredient);
-            if (neighbor) dayReason = `El ingrediente base ${r.base_ingredient} ya se usa en un día consecutivo.`;
+            const order = cycleOrder(arrival);
+            const current = order.indexOf(weekday);
+            const neighbor = withoutCurrent.find((i) => {
+              if (i.component !== "main" || !i.recipe_id) return false;
+              const other = order.indexOf(i.weekday);
+              return other >= 0
+                && Math.abs(other - current) === 1
+                && catalog.recipes.find((x) => x.id === i.recipe_id)?.base_ingredient === r.base_ingredient;
+            });
+            if (neighbor) dayReason = `El ingrediente base ${r.base_ingredient} ya se usa en un día consecutivo del ciclo real.`;
           }
         }
         const stockReason = service === "salad" ? null : menuStockReason(withoutCurrent, { recipe_id: r.id }, catalog, diners);
@@ -137,3 +151,6 @@ function Tag({ children, tone }: { children: React.ReactNode; tone?: "warn" | "m
   const cls = tone === "warn" ? "bg-amber-100 text-amber-800" : tone === "muted" ? "bg-slate-100 text-slate-600" : "bg-corp-100 text-corp-700";
   return <span className={`badge ${cls}`}>{children}</span>;
 }
+
+
+
