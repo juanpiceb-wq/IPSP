@@ -232,3 +232,8 @@ Para volver a cargar el catálogo desde una versión nueva del Excel: exportar l
 - Desde el día 4: preparaciones con maduro.
 - El ceviche dominical con chifle conserva la excepción operativa de verde reservado/procesado dentro de la ventana válida.
 - La regla se aplica también cuando "verde", "maduro", "patacón", "bolón", "tigrillo", "corviche" o "chifle" aparece como parte del nombre del plato y no como base dominante.
+
+### Reglas operativas V5.5
+- En almuerzo y cena no se define una receta específica de ensalada: el menú muestra **Ensalada a elección**.
+- Una misma familia de plato no puede repetirse en la misma semana. Ejemplos: cualquier Chaulafán cuenta como una sola familia; cualquier Ceviche cuenta como una sola familia, sin importar la proteína.
+- Los menús pueden editarse y guardarse incluso después de iniciado el ciclo de uso. En menús en ejecución se puede alternar entre **Editar menú** y **Cumplimiento**.

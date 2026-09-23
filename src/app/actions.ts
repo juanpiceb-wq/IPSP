@@ -158,11 +158,7 @@ export async function actionSaveMenu(menu: {
 }): Promise<string> {
   const repo = getRepo();
   const id = menu.id ?? newId("menu");
-  if (menu.id) {
-    const existing = await repo.getMenu(menu.id);
-    if (existing && menuStarted(existing)) throw new Error("La semana ya inició. El menú quedó bloqueado y solo admite registro de cumplimiento.");
-  }
-  if (menu.status === "aprobado") {
+if (menu.status === "aprobado") {
     const [catalog, history] = await Promise.all([repo.getCatalog(), repo.listMenus()]);
     const validation = validateMenu({
       items: menu.items,
@@ -355,5 +351,6 @@ function menuStarted(menu: WeeklyMenu) {
 }
 
 function uniqueId(base: string) { return `${base || "item"}-${Math.random().toString(36).slice(2, 6)}`; }
+
 
 

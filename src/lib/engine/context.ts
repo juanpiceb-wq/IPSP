@@ -318,5 +318,26 @@ export function makeRng(seed: string) {
 }
 
 export const MAIN_SERVICE_ORDER: MainService[] = ["breakfast", "lunch", "dinner"];
+/**
+ * Clave semanal del plato.
+ * Para nombres distintivos toma el concepto antes de "de"/"con"/"relleno".
+ * Ej.: "Ceviche de camarón" y "Ceviche de tilapia" => "family:ceviche".
+ * Evita agrupar raíces demasiado genéricas como arroz, sopa o caldo.
+ */
+const GENERIC_DISH_ROOTS = new Set([
+  "arroz","sopa","caldo","ensalada","guiso","menestra","moro","seco",
+  "carne","pollo","cerdo","chuleta","huevo","tortilla","pescado","papa","pure"
+]);
 
+export function weeklyDishKey(name: string): string {
+  const clean = normalize(name)
+    .replace(/[^a-z0-9ñ\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!clean) return "exact:";
+  const root = clean.split(/\b(?:de|con|relleno|rellena|acompanado|acompanada|y)\b/)[0].trim();
+  const first = root.split(" ")[0] ?? "";
+  if (root && first && !GENERIC_DISH_ROOTS.has(first)) return `family:${root}`;
+  return `exact:${clean}`;
+}
 

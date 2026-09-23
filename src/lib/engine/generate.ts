@@ -10,6 +10,7 @@ import {
   isMeaningfulBase,
   makeRng,
   recencyWeight,
+  weeklyDishKey,
 } from "./context";
 
 export interface GenerateInput {
@@ -138,7 +139,7 @@ function generateMenuAttempt(input: GenerateInput, seed: string): GenerateOutput
     }
   }
 
-  assignSalads(items, input, ctx, rng, finalState.usedRecipes);
+  items.forEach((item) => { if (item.component === "main" && (item.service === "lunch" || item.service === "dinner")) item.salad_recipe_id = null; });
   items.sort(sortItems);
 
   const missing = items.filter((i) => !i.recipe_id).length;
@@ -294,6 +295,13 @@ function candidateList(a: PickArgs): Candidate[] {
   const candidates: Candidate[] = [];
   for (const recipe of a.catalog.recipes) {
     if (!recipe.active || a.usedRecipes.has(recipe.id)) continue;
+    const dishKey = weeklyDishKey(recipe.name);
+    const repeatedFamily = a.items.some((item) => {
+      if (!item.recipe_id) return false;
+      const used = a.ctx.recipesById.get(item.recipe_id);
+      return !!used && weeklyDishKey(used.name) === dishKey;
+    });
+    if (repeatedFamily) continue;
     if (!isEligible(recipe, service, a.weekday, a.ctx)) continue;
 
     const proteinId = recipe.primary_protein_id;
@@ -542,7 +550,7 @@ function mainCapacityDiagnostic(input: GenerateInput) {
 function generationQuality(out: GenerateOutput, input: GenerateInput) {
   const mains = out.items.filter((i) => i.component === "main" && i.recipe_id).length;
   const soups = out.items.filter((i) => i.component === "soup" && i.recipe_id).length;
-  const salads = out.items.filter((i) => i.component === "main" && (i.service === "lunch" || i.service === "dinner") && i.salad_recipe_id).length;
+  const salads = out.items.filter((i) => i.component === "main" && i.recipe_id && (i.service === "lunch" || i.service === "dinner")).length;
   const uses = new Map<string, number>();
   out.items.filter((i) => i.component === "main" && i.protein_id).forEach((i) => uses.set(i.protein_id!, (uses.get(i.protein_id!) ?? 0) + 1));
   let targetCoverage = 0;
@@ -557,7 +565,7 @@ function generationQuality(out: GenerateOutput, input: GenerateInput) {
 function isCompleteGeneration(out: GenerateOutput, input: GenerateInput) {
   const mains = out.items.filter((i) => i.component === "main" && i.recipe_id).length;
   const soups = out.items.filter((i) => i.component === "soup" && i.recipe_id).length;
-  const salads = out.items.filter((i) => i.component === "main" && (i.service === "lunch" || i.service === "dinner") && i.salad_recipe_id).length;
+  const salads = out.items.filter((i) => i.component === "main" && i.recipe_id && (i.service === "lunch" || i.service === "dinner")).length;
   if (mains !== RULES.MAIN_SLOTS || soups !== RULES.SOUP_SLOTS || salads < RULES.SALAD_MIN) return false;
   const uses = new Map<string, number>();
   for (const it of out.items) if (it.protein_id) uses.set(it.protein_id, (uses.get(it.protein_id) ?? 0) + 1);
@@ -578,6 +586,12 @@ export function sortItems(a: MenuItem, b: MenuItem) {
   const rb = SERVICE_RANK[b.service] * 2 + (b.component === "soup" ? -1 : 0);
   return ra - rb;
 }
+
+
+
+
+
+
 
 
 

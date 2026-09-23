@@ -2,7 +2,7 @@
 import { RULES, allowedBeverages, cycleOrder } from "../rules";
 import { WEEKDAYS } from "../types";
 import { addConsumption, availableQuantity, inventorySummary, recipeConsumptions } from "../supply";
-import { blockingReason, buildContext, buildHistoryIndex, isMeaningfulBase, recencyWeight } from "./context";
+import { blockingReason, buildContext, buildHistoryIndex, isMeaningfulBase, recencyWeight, weeklyDishKey } from "./context";
 
 export interface ValidateInput {
   items: MenuItem[];
@@ -64,14 +64,6 @@ export function validateMenu(input: ValidateInput): ValidationResult {
       invalid++;
       issues.push({ level: "error", rule: "restriccion", message: `${WEEKDAYS[it.weekday].label} · ${labelOf(it)}: ${reason}`, weekday: it.weekday, service: it.service });
     }
-    if (it.salad_recipe_id) {
-      const salad = ctx.recipesById.get(it.salad_recipe_id);
-      const sreason = salad ? blockingReason(salad, "salad", it.weekday, ctx) : "Ensalada inexistente.";
-      if (sreason) {
-        invalid++;
-        issues.push({ level: "error", rule: "restriccion", message: `${WEEKDAYS[it.weekday].label} · ${labelOf(it)} (ensalada): ${sreason}`, weekday: it.weekday, service: it.service });
-      }
-    }
   }
   if (!invalid) issues.push({ level: "ok", rule: "restriccion", message: "Todas las preparaciones respetan servicio, paridad, domingo, doble fritura y maduración." });
 
@@ -85,6 +77,33 @@ export function validateMenu(input: ValidateInput): ValidationResult {
   const sundayDinnerRecipe = sundayDinner?.recipe_id ? ctx.recipesById.get(sundayDinner.recipe_id) : null;
   if (sundayDinnerRecipe && !sundayDinnerRecipe.sunday_roast)
     issues.push({ level: "error", rule: "domingo-cena", message: "La cena del domingo debe ser una preparación asada habilitada." });
+
+  // Una misma familia de plato no puede repetirse durante la semana.
+  // Ej.: Chaulafán de camarón + Chaulafán de cerdo = repetición.
+  //      Ceviche de camarón + Ceviche de tilapia = repetición.
+  const familySeen = new Map<string, { name: string; weekday: Weekday }>();
+  let familyRepeats = 0;
+  for (const it of items) {
+    if (!it.recipe_id) continue;
+    const recipe = ctx.recipesById.get(it.recipe_id);
+    if (!recipe) continue;
+    const dishKey = weeklyDishKey(recipe.name);
+    const previous = familySeen.get(dishKey);
+    if (previous) {
+      familyRepeats++;
+      issues.push({
+        level: "error",
+        rule: "familia-plato-semana",
+        message: `${recipe.name} repite la misma familia de plato que ${previous.name}. Una familia de plato solo puede aparecer una vez por semana.`,
+        weekday: it.weekday,
+        service: it.service,
+      });
+    } else {
+      familySeen.set(dishKey, { name: recipe.name, weekday: it.weekday });
+    }
+  }
+  if (!familyRepeats)
+    issues.push({ level: "ok", rule: "familia-plato-semana", message: "No se repiten familias de platos durante la semana." });
 
   // Proteína repetida el mismo día.
   let repeated = 0;
@@ -185,14 +204,13 @@ export function validateMenu(input: ValidateInput): ValidationResult {
   }
   if (!baseRepeats) issues.push({ level: "ok", rule: "base-consecutiva", message: "No se repiten ingredientes base dominantes en días consecutivos." });
 
-  // Ensaladas.
-  const saladCount = lunchDinner.filter((i) => i.recipe_id && i.salad_recipe_id).length;
-  if (saladCount < RULES.SALAD_MIN) {
-    issues.push({ level: "error", rule: "ensaladas", message: `${saladCount}/${RULES.SALAD_SERVICES} servicios con ensalada. Se requieren ${RULES.SALAD_TARGET}.` });
-  } else if (saladCount > RULES.SALAD_TARGET) {
-    issues.push({ level: "warn", rule: "ensaladas", message: `${saladCount}/${RULES.SALAD_SERVICES} servicios con ensalada. La generación automática trabaja con ${RULES.SALAD_TARGET}; priorice omitirla en platos dificultad 3.` });
+  // Ensalada operativa: no se define una receta concreta. Todo almuerzo y cena
+  // muestra "Ensalada a elección" para que la cocina escoja con el producto disponible.
+  const saladCount = lunchDinner.filter((i) => i.recipe_id).length;
+  if (saladCount < RULES.SALAD_SERVICES) {
+    issues.push({ level: "error", rule: "ensaladas", message: `${saladCount}/${RULES.SALAD_SERVICES} servicios de almuerzo/cena completos para ensalada a elección.` });
   } else {
-    issues.push({ level: "ok", rule: "ensaladas", message: `${saladCount}/${RULES.SALAD_SERVICES} almuerzos y cenas con ensalada. Los platos D3 pueden ir sin ensalada.` });
+    issues.push({ level: "ok", rule: "ensaladas", message: "Los 14 almuerzos y cenas incluyen Ensalada a elección." });
   }
 
   // Bebidas permitidas por servicio/paridad.
@@ -309,4 +327,8 @@ export function menuStockReason(items: MenuItem[], candidate: { recipe_id: strin
 }
 
 function round(v: number) { return Math.round(v * 100) / 100; }
+
+
+
+
 

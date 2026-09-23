@@ -4,8 +4,8 @@ export const RULES = {
   MAIN_SLOTS: 21,
   SOUP_SLOTS: 6,
   SALAD_SERVICES: 14,
-  SALAD_MIN: 10,
-  SALAD_TARGET: 10,
+  SALAD_MIN: 14,
+  SALAD_TARGET: 14,
   PORK_EXCEPTIONS_ALLOWED: 1,
   HISTORY_WEEKS: 8,
   MAX_DAILY_DIFFICULTY: 6,
@@ -65,5 +65,7 @@ export function cycleOrder(arrival: Weekday): Weekday[] {
 }
 
 export const SUNDAY_PREFERRED_PROTEINS = ["pollo", "lomo-cerdo", "estofado-res"];
+
+
 
 

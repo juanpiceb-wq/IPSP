@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { useMemo, useState } from "react";
-import { blockingReason, buildContext, isMeaningfulBase } from "@/lib/engine/context";
+import { blockingReason, buildContext, isMeaningfulBase, weeklyDishKey } from "@/lib/engine/context";
 import { menuStockReason } from "@/lib/engine/validate";
 import { RULES, cycleOrder } from "@/lib/rules";
 import type { Catalog, MenuItem, Parity, Recipe, Service, Weekday } from "@/lib/types";
@@ -44,6 +44,12 @@ export default function RecipePicker({
       .map((r) => {
         const hard = blockingReason(r, service, weekday, ctx);
         const inWeek = usedRecipeIds.includes(r.id) && r.id !== currentId;
+        const dishKey = weeklyDishKey(r.name);
+        const familyInWeek = withoutCurrent.some((i) => {
+          if (!i.recipe_id) return false;
+          const used = catalog.recipes.find((x) => x.id === i.recipe_id);
+          return !!used && weeklyDishKey(used.name) === dishKey;
+        });
         const protein = r.primary_protein_id ? catalog.proteins.find((p) => p.id === r.primary_protein_id) : null;
         const currentProteinId = currentRecipe?.primary_protein_id ?? null;
         const used = protein ? proteinUseCounts[protein.id] ?? 0 : 0;
@@ -92,10 +98,10 @@ export default function RecipePicker({
           }
         }
         const stockReason = service === "salad" ? null : menuStockReason(withoutCurrent, { recipe_id: r.id }, catalog, diners);
-        return { recipe: r, blocked: hard ?? maxReason ?? dayReason ?? stockReason ?? (inWeek ? "Ya está utilizada en esta semana." : null) };
+        return { recipe: r, blocked: hard ?? maxReason ?? dayReason ?? stockReason ?? (familyInWeek ? "Ya existe un plato de esta misma familia en la semana." : null) ?? (inWeek ? "Ya está utilizada en esta semana." : null) };
       })
       .sort((a, b) => Number(!!a.blocked) - Number(!!b.blocked) || a.recipe.name.localeCompare(b.recipe.name, "es"));
-  }, [catalog, service, query, weekday, ctx, usedRecipeIds, proteinUseCounts, currentId, items, diners]);
+  }, [catalog, service, query, weekday, ctx, usedRecipeIds, proteinUseCounts, currentId, items, diners, arrival]);
 
   const valid = rows.filter((r) => !r.blocked);
   const invalid = rows.filter((r) => r.blocked);
@@ -151,6 +157,10 @@ function Tag({ children, tone }: { children: React.ReactNode; tone?: "warn" | "m
   const cls = tone === "warn" ? "bg-amber-100 text-amber-800" : tone === "muted" ? "bg-slate-100 text-slate-600" : "bg-corp-100 text-corp-700";
   return <span className={`badge ${cls}`}>{children}</span>;
 }
+
+
+
+
 
 
 
