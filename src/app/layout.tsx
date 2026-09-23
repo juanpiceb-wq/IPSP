@@ -1,12 +1,12 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
-import Watermark from "@/components/Watermark";
+
 import { getRepo } from "@/lib/db";
 
 export const metadata: Metadata = {
-  title: "Planificación de Alimentación",
-  description: "Generación, validación y control de menús semanales de campamentos",
+  title: "Proyecto de Mejora de Alimentación IPSP",
+  description: "Sistema de control para la mejora de alimentación IPSP",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -18,8 +18,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <Sidebar mode={mode} />
           <main className="flex-1 overflow-x-hidden">{children}</main>
         </div>
-        <Watermark />
+
       </body>
     </html>
   );
 }
+
+
+

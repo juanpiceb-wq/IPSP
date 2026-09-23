@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { WEEKDAYS } from "./types";
 import type { Catalog, MainService, MenuItem, Weekday } from "./types";
@@ -41,7 +41,6 @@ export function exportMenuExcel(args: ExportArgs) {
   rows.push(["", "Ensalada", ...WEEKDAYS.map((d) => recipeName(find(d.value, "dinner", "main")?.salad_recipe_id) || "Sin ensalada")]);
   rows.push(["", "Bebida", ...WEEKDAYS.map((d) => find(d.value, "dinner", "main")?.beverage ?? "")]);
   rows.push([]);
-  rows.push(["Master User: Juan Pablo Ceballos"]);
 
   const htmlRows = rows.map((row, ri) => {
     const cells = row.map((cell) => {
@@ -71,3 +70,4 @@ function escapeHtml(value: string) {
 function safeFile(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/gi, "_").replace(/^_|_$/g, "").toLowerCase();
 }
+

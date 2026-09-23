@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { formatDate } from "./dates";
 import { WEEKDAYS } from "./types";
@@ -47,7 +47,8 @@ export function exportMenuPdf(input: ExportMenuPdfInput) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `menu_semana_${input.week}_${input.campId}.pdf`;
+  const scopeName = input.campName ?? input.catalog.camps.find((c) => c.id === input.campId)?.name ?? input.campId;
+  a.download = `Menu ${safeFileName(scopeName)} Semana ${input.week}.pdf`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -152,15 +153,7 @@ export function buildMenuPdf(input: ExportMenuPdfInput): Uint8Array {
   const footerY = PAGE_H - BOTTOM + 2;
   drawLine(push, MARGIN_X, footerY - 9, PAGE_W - MARGIN_X, footerY - 9, GRID, 0.6);
   drawText(push, "Todos los servicios incluyen arroz.", MARGIN_X, footerY, 6.8, MUTED, false);
-  drawTextRight(
-    push,
-    "Master User: Juan Pablo Ceballos",
-    PAGE_W - MARGIN_X,
-    footerY,
-    6.5,
-    MUTED,
-    false
-  );
+
 
   // Si algún nombre excepcionalmente largo empuja la tabla hacia abajo, el PDF sigue
   // siendo de una sola página; el tamaño anterior está pensado para el catálogo actual.
@@ -290,6 +283,13 @@ function n(v: number): string {
   return Number(v.toFixed(2)).toString();
 }
 
+function safeFileName(value: string) {
+  return value
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "")
+    .replace(/\s+/g, " ")
+    .trim() || "Menu";
+}
+
 function pdfEscape(text: string): string {
   return text
     .replace(/[–—]/g, "-")
@@ -396,3 +396,6 @@ function makePdf(stream: Uint8Array): Uint8Array {
   parts.push(ascii(xref));
   return concat(parts);
 }
+
+
+
