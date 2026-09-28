@@ -33,7 +33,7 @@ export function exportMenuExcel(args: ExportArgs) {
   rows.push(["", "Plato fuerte", ...WEEKDAYS.map((d) => recipeName(find(d.value, "lunch", "main")?.recipe_id))]);
   rows.push(["", "Proteína", ...WEEKDAYS.map((d) => proteinName(find(d.value, "lunch", "main")?.protein_id))]);
   rows.push(["", "Arroz", ...WEEKDAYS.map(() => "Incluido")]);
-  rows.push(["", "Ensalada", ...WEEKDAYS.map(() => "Ensalada a elección")]);
+  rows.push(["", "Ensalada", ...WEEKDAYS.map((d) => recipeName(find(d.value, "lunch", "main")?.salad_recipe_id) || "Sin ensalada")]);
   rows.push(["", "Bebida", ...WEEKDAYS.map((d) => find(d.value, "lunch", "main")?.beverage ?? "")]);
   rows.push(["CENA", "Plato fuerte", ...WEEKDAYS.map((d) => recipeName(find(d.value, "dinner", "main")?.recipe_id))]);
   rows.push(["", "Proteína", ...WEEKDAYS.map((d) => proteinName(find(d.value, "dinner", "main")?.protein_id))]);
