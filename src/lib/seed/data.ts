@@ -16,6 +16,7 @@ import {
 } from "./catalog.generated";
 import { MASTER_RECIPES_V2, PRODUCTS_V2 } from "./catalog.v2.generated";
 import type { MasterIngredient } from "./catalog.generated";
+import { FINAL_SALAD_RECIPES } from "../salads";
 
 export type { MasterIngredient };
 
@@ -55,7 +56,7 @@ const LATEST_MASTER_RECIPES: Recipe[] = MASTER_RECIPES_V2.map((r) => {
   return r;
 });
 
-export const RECIPES: Recipe[] = [...LATEST_MASTER_RECIPES, ...HISTORICAL_FALLBACK];
+export const RECIPES: Recipe[] = [...LATEST_MASTER_RECIPES, ...FINAL_SALAD_RECIPES, ...HISTORICAL_FALLBACK];
 
 /* ============================ PROTEÍNAS ============================ */
 
