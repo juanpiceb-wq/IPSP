@@ -145,6 +145,12 @@ export function blockingReason(
 
   const protein = recipe.primary_protein_id ? ctx.proteinsById.get(recipe.primary_protein_id) : null;
 
+  // Regla operativa: fritada y chuleta de cerdo nunca se programan en desayuno.
+  if (service === "breakfast" && (recipe.primary_protein_id === "fritada" || recipe.primary_protein_id === "chuleta-cerdo"))
+    return recipe.primary_protein_id === "fritada"
+      ? "Fritada no puede utilizarse en desayuno."
+      : "Chuleta de cerdo no puede utilizarse en desayuno.";
+
   if (protein) {
     if (!protein.active) return `La proteína ${protein.name} está desactivada.`;
     if ((protein.breakfast_only || protein.id === "atun" || protein.id === "huevo") && service !== "breakfast")
