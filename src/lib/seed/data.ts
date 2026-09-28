@@ -49,8 +49,10 @@ const LATEST_MASTER_RECIPES: Recipe[] = MASTER_RECIPES_V2.map((r) => {
   if (r.primary_protein_id === "atun" || r.primary_protein_id === "huevo") return r;
   // Sopa/ensalada, doble fritura y platos fijos conservan exactamente su restricción de servicio.
   if (r.services.includes("soup") || r.services.includes("salad") || r.double_fry || r.fixed_service || r.only_weekday != null) return r;
-  // Regla vigente: las demás proteínas generales pueden participar en desayuno.
+  // Regla vigente: las demás proteínas generales pueden participar en desayuno,
+  // excepto Fritada y Chuleta de cerdo.
   if (r.primary_protein_id && (r.services.includes("lunch") || r.services.includes("dinner"))) {
+    if (r.primary_protein_id === "fritada" || r.primary_protein_id === "chuleta-cerdo") return r;
     return { ...r, services: Array.from(new Set<Recipe["services"][number]>(["breakfast", ...r.services])) };
   }
   return r;
