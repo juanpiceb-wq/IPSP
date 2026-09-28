@@ -28,8 +28,9 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
   const [pending,startTransition] = useTransition();
   const [year,setYear] = useState(defaults.year);
   const [week,setWeek] = useState(defaults.week);
-  const firstTarget = defaults.campId ? `camp:${defaults.campId}` : catalog.camps[0] ? `camp:${catalog.camps[0].id}` : "";
-  const [target,setTarget] = useState(firstTarget);
+  const [scope,setScope] = useState<"camp"|"zones">("camp");
+  const [campId,setCampId] = useState(defaults.campId || catalog.camps[0]?.id || "");
+  const [zoneIds,setZoneIds] = useState<string[]>([]);
   const [items,setItems] = useState<MenuItem[]>([]);
   const [issues,setIssues] = useState<ValidationIssue[]>([]);
   const [metrics,setMetrics] = useState<MenuMetrics|null>(null);
@@ -41,15 +42,27 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
   const [bulkResults,setBulkResults] = useState<BulkCampResult[]>([]);
 
   const parity = parityOfWeek(week);
-  const [targetType,targetId] = target.split(":") as ["camp"|"zone",string];
-  const camp = targetType === "camp" ? catalog.camps.find(c=>c.id===targetId) : undefined;
-  const zone = targetType === "zone" ? catalog.zones.find(z=>z.id===targetId) : undefined;
-  const zoneCamps = zone ? catalog.camps.filter(c=>c.active && c.zone_id===zone.id) : [];
-  const bulkMode = targetType === "zone";
-  const campIds = bulkMode ? zoneCamps.map(c=>c.id) : camp ? [camp.id] : [];
-  const arrival = (camp?.reception_weekday_default ?? zoneCamps[0]?.reception_weekday_default ?? 1) as Weekday;
+  const camp = scope === "camp" ? catalog.camps.find(c=>c.id===campId) : undefined;
+  const activeZones = catalog.zones.filter(z=>z.active);
+  const selectedZones = activeZones.filter(z=>zoneIds.includes(z.id));
+  const zoneCampMap = new Map(activeZones.map(z=>[
+    z.id,
+    catalog.camps.filter(c=>c.active && c.zone_id===z.id)
+  ]));
+  const zoneArrival = (zoneId:string) => {
+    const camps = zoneCampMap.get(zoneId) ?? [];
+    const days = Array.from(new Set(camps.map(c=>c.reception_weekday_default)));
+    return days.length === 1 ? days[0] as Weekday : null;
+  };
+  const selectedArrival = selectedZones.length ? zoneArrival(selectedZones[0].id) : null;
+  const zoneCamps = selectedZones.flatMap(z=>zoneCampMap.get(z.id) ?? []);
+  const bulkMode = scope === "zones";
+  const campIds = bulkMode ? Array.from(new Set(zoneCamps.map(c=>c.id))) : camp ? [camp.id] : [];
+  const arrival = (camp?.reception_weekday_default ?? selectedArrival ?? 1) as Weekday;
   const diners = camp?.diners_default ?? zoneCamps[0]?.diners_default ?? 100;
   const dates = cycleDates(year,week,arrival);
+  const zonesCompatible = !bulkMode || (selectedZones.length > 0 && selectedArrival !== null && selectedZones.every(z=>zoneArrival(z.id)===selectedArrival));
+  const bulkLabel = selectedZones.map(z=>z.name).join(" + ");
 
   const usedRecipeIds = useMemo(()=>items.flatMap(i=>[i.recipe_id,i.salad_recipe_id].filter(Boolean) as string[]),[items]);
   const proteinUseCounts = useMemo(()=>{const x:Record<string,number>={};items.forEach(i=>{if(i.protein_id)x[i.protein_id]=(x[i.protein_id]??0)+1});return x;},[items]);
@@ -58,7 +71,9 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
     setMessage(null);
     startTransition(async()=>{
       try{
-        if(!targetId) throw new Error("Seleccione un campamento o una zona.");
+        if(scope==="camp" && !camp) throw new Error("Seleccione un campamento.");
+        if(scope==="zones" && !zoneIds.length) throw new Error("Seleccione al menos una zona.");
+        if(scope==="zones" && !zonesCompatible) throw new Error("Las zonas seleccionadas deben recibir los víveres el mismo día.");
         if(bulkMode){
           if(!campIds.length) throw new Error("La zona seleccionada no tiene campamentos activos.");
           const res=await actionGenerateBulk({year,week,campIds});
@@ -110,19 +125,46 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
 
   return <div className="space-y-4">
     <section className="surface no-print p-5">
-      <div className="grid gap-4 md:grid-cols-[150px_150px_minmax(280px,1fr)_auto] md:items-end">
+      <div className="grid gap-4 md:grid-cols-[150px_150px_minmax(360px,1fr)_auto] md:items-end">
         <div><label className="label">Año</label><input type="number" className="input" value={year} onChange={e=>setYear(Number(e.target.value))}/></div>
         <div><label className="label">Semana</label><input type="number" min={1} max={53} className="input" value={week} onChange={e=>setWeek(Number(e.target.value))}/></div>
-        <div><label className="label">Campamento o zona</label><select className="input" value={target} onChange={e=>{setTarget(e.target.value);setItems([]);setMessage(null)}}>
-          <optgroup label="Campamentos">{catalog.camps.filter(c=>c.active).map(c=><option key={c.id} value={`camp:${c.id}`}>{c.name}</option>)}</optgroup>
-          {catalog.zones.some(z=>z.active)?<optgroup label="Zonas">{catalog.zones.filter(z=>z.active).map(z=><option key={z.id} value={`zone:${z.id}`}>{z.name} · todos los campamentos</option>)}</optgroup>:null}
-        </select></div>
-        <button className="btn-primary h-[42px]" onClick={()=>generate(false)} disabled={pending||!targetId}>{pending?"Generando…":"Generar menú"}</button>
+        <div className="space-y-2">
+          <label className="label">Planificar para</label>
+          <div className="flex gap-2">
+            <button type="button" className={`btn-ghost btn-sm ${scope==="camp"?"bg-corp-100":""}`} onClick={()=>{setScope("camp");setZoneIds([]);setItems([]);setMessage(null)}}>Campamento</button>
+            <button type="button" className={`btn-ghost btn-sm ${scope==="zones"?"bg-corp-100":""}`} onClick={()=>{setScope("zones");setItems([]);setMessage(null)}}>Una o más zonas</button>
+          </div>
+          {scope==="camp"?
+            <select className="input" value={campId} onChange={e=>{setCampId(e.target.value);setItems([]);setMessage(null)}}>
+              {catalog.camps.filter(c=>c.active).map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          :
+            <div className="rounded-lg border border-line bg-white p-2">
+              <div className="grid gap-1 sm:grid-cols-2">
+                {activeZones.map(z=>{
+                  const day=zoneArrival(z.id);
+                  const selected=zoneIds.includes(z.id);
+                  const compatible=day!==null && (selectedArrival===null || day===selectedArrival || selected);
+                  return <label key={z.id} className={`flex items-center gap-2 rounded-md px-2 py-2 text-sm ${!compatible?"opacity-45":""}`}>
+                    <input type="checkbox" checked={selected} disabled={!compatible&&!selected} onChange={()=>{
+                      setZoneIds(prev=>selected?prev.filter(id=>id!==z.id):[...prev,z.id]);
+                      setItems([]);setMessage(null);
+                    }}/>
+                    <span className="flex-1">{z.name}</span>
+                    <span className="text-[11px] text-muted">{day===null?"Recepción mixta":WEEKDAYS[day].label}</span>
+                  </label>;
+                })}
+              </div>
+              <p className="mt-2 text-[11px] text-muted">Solo se pueden combinar zonas cuyos campamentos reciben víveres el mismo día.</p>
+            </div>
+          }
+        </div>
+        <button className="btn-primary h-[42px]" onClick={()=>generate(false)} disabled={pending||(scope==="camp"?!camp:!zoneIds.length||!zonesCompatible)}>{pending?"Generando…":"Generar menú"}</button>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-4 text-xs">
         <span className={`chip ${parity==="par"?"chip-dark":"chip-info"}`}>SEMANA {parity.toUpperCase()}</span>
         {camp?<><span className="chip-muted">{camp.diners_default} comensales</span><span className="chip-muted">Víveres: {WEEKDAYS[camp.reception_weekday_default].label}</span><span className="text-muted">Uso real: {formatDate(dates.start)} → {formatDate(dates.end)}</span></>:null}
-        {zone?<><span className="chip-info">Zona: {zone.name}</span><span className="chip-muted">{zoneCamps.length} campamentos</span><span className="text-muted">Mismo menú base; cumplimiento independiente por cocina.</span></>:null}
+        {bulkMode&&selectedZones.length?<><span className="chip-info">{selectedZones.length===1?"Zona":"Zonas"}: {bulkLabel}</span><span className="chip-muted">{zoneCamps.length} campamentos</span><span className="chip-muted">Víveres: {WEEKDAYS[arrival].label}</span><span className="text-muted">Un solo menú para todas las zonas seleccionadas; cumplimiento independiente por cocina.</span></>:null}
         {items.length?<div className="ml-auto flex gap-2"><button className="btn-ghost btn-sm" onClick={()=>generate(false)} disabled={pending}>Otra opción</button>{!bulkMode?<button className="btn-ghost btn-sm" onClick={()=>generate(true)} disabled={pending}>Regenerar no bloqueados</button>:null}</div>:null}
       </div>
     </section>
@@ -140,13 +182,13 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
 
       <section className="surface p-4 print-full">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div><h2 className="text-lg font-semibold text-navy-900">Semana {week} · {bulkMode?zone?.name:camp?.name}</h2><p className="text-xs text-muted">Clic en un plato para reemplazarlo. Use el candado para conservarlo al regenerar.</p></div>
-          <div className="no-print flex flex-wrap gap-2"><button className="btn-ghost btn-sm" disabled={exportBlocked} onClick={()=>exportMenuPdf({items,catalog,week,parity,campId:camp?.id??"",campName:bulkMode?zone?.name:camp?.name,diners:bulkMode?zoneCamps.reduce((sum,c)=>sum+c.diners_default,0):(camp?.diners_default??0),dinersLabel:bulkMode?`${zoneCamps.length} campamentos`:undefined,start:bulkMode?null:dates.start,end:bulkMode?null:dates.end})}>PDF</button><button className="btn-ghost btn-sm" disabled={exportBlocked} onClick={()=>exportMenuExcel({items,catalog,year,week,campName:bulkMode?zone?.name??"Zona":camp?.name??"Campamento",diners:bulkMode?zoneCamps.reduce((sum,c)=>sum+c.diners_default,0):(camp?.diners_default??0),start:bulkMode?null:dates.start,end:bulkMode?null:dates.end})}>Excel</button></div>
+          <div><h2 className="text-lg font-semibold text-navy-900">Semana {week} · {bulkMode?bulkLabel:camp?.name}</h2><p className="text-xs text-muted">Clic en un plato para reemplazarlo. Use el candado para conservarlo al regenerar.</p></div>
+          <div className="no-print flex flex-wrap gap-2"><button className="btn-ghost btn-sm" disabled={exportBlocked} onClick={()=>exportMenuPdf({items,catalog,week,parity,campId:camp?.id??"",campName:bulkMode?bulkLabel:camp?.name,diners:bulkMode?zoneCamps.reduce((sum,c)=>sum+c.diners_default,0):(camp?.diners_default??0),dinersLabel:bulkMode?`${zoneCamps.length} campamentos`:undefined,start:bulkMode?null:dates.start,end:bulkMode?null:dates.end})}>PDF</button><button className="btn-ghost btn-sm" disabled={exportBlocked} onClick={()=>exportMenuExcel({items,catalog,year,week,campName:bulkMode?bulkLabel||"Zonas":camp?.name??"Campamento",diners:bulkMode?zoneCamps.reduce((sum,c)=>sum+c.diners_default,0):(camp?.diners_default??0),start:bulkMode?null:dates.start,end:bulkMode?null:dates.end})}>Excel</button></div>
         </div>
         <MenuTable items={items} catalog={catalog} editable onCell={setCell} onToggleLock={toggleLock}/>
         <div className="no-print mt-4 flex justify-end gap-2 border-t border-line pt-4"><button className="btn-ghost" onClick={()=>save("borrador")} disabled={saving}>Guardar borrador</button><button className="btn-primary" onClick={()=>save("aprobado")} disabled={saving||exportBlocked}>Guardar y aprobar</button></div>
       </section>
-    </>:<section className="empty-state"><div className="empty-icon">+</div><h2>Genera la planificación de la semana</h2><p>Escoge un campamento o una zona. Los comensales, recepción y demás datos se toman automáticamente de su configuración.</p></section>}
+    </>:<section className="empty-state"><div className="empty-icon">+</div><h2>Genera la planificación de la semana</h2><p>Escoge un campamento o selecciona una o más zonas. Las zonas solo pueden compartir menú cuando todos sus campamentos reciben víveres el mismo día.</p></section>}
 
     <Modal open={!!cell} onClose={()=>setCell(null)} wide title={cell?`${WEEKDAYS[cell.weekday].label} · ${cell.component==="soup"?"Sopa":cell.field==="salad"?"Ensalada":cell.service==="breakfast"?"Desayuno":cell.service==="lunch"?"Almuerzo":"Cena"}`:""} subtitle="Solo se muestran preparaciones válidas para este espacio.">
       {cell?<div className="space-y-4">{cell.field==="recipe"&&activeItem?.reasons?.length?<div className="rounded-xl bg-corp-100 p-3 text-xs text-navy-800"><strong>Selección actual</strong><ul className="mt-1 list-disc pl-5">{activeItem.reasons.map((r,i)=><li key={i}>{r}</li>)}</ul></div>:null}<RecipePicker catalog={catalog} service={cell.field==="salad"?"salad":cell.component==="soup"?"soup":cell.service} weekday={cell.weekday} parity={parity} arrival={arrival} currentId={cell.field==="salad"?activeItem?.salad_recipe_id??null:activeItem?.recipe_id??null} usedRecipeIds={usedRecipeIds} proteinUseCounts={proteinUseCounts} lastUsed={lastUsed} items={items} diners={diners} onPick={pick}/></div>:null}
