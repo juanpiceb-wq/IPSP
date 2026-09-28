@@ -45,6 +45,7 @@ export default function RecipesClient({ catalog }: { catalog: Catalog }) {
   const [filterService, setFilterService] = useState("");
   const [filterBase, setFilterBase] = useState("");
   const [filterParity, setFilterParity] = useState("");
+  const [showInactive, setShowInactive] = useState(false);
   const [editing, setEditing] = useState<(Recipe & { isNew?: boolean }) | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +59,7 @@ export default function RecipesClient({ catalog }: { catalog: Catalog }) {
   const filtered = useMemo(() => {
     const q = query.trim().toLocaleLowerCase("es");
     return catalog.recipes.filter((r) => {
+      if (!showInactive && !r.active) return false;
       if (q && !`${r.name} ${r.base_ingredient ?? ""}`.toLocaleLowerCase("es").includes(q)) return false;
       if (filterProtein && r.primary_protein_id !== filterProtein) return false;
       if (filterService && !r.services.includes(filterService as Service)) return false;
@@ -71,7 +73,7 @@ export default function RecipesClient({ catalog }: { catalog: Catalog }) {
       }
       return true;
     }).sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name, "es"));
-  }, [catalog, query, filterProtein, filterService, filterBase, filterParity]);
+  }, [catalog, query, filterProtein, filterService, filterBase, filterParity, showInactive]);
 
   function toggleService(service: Service) {
     if (!editing) return;
@@ -136,7 +138,7 @@ export default function RecipesClient({ catalog }: { catalog: Catalog }) {
         </div>
         <div className="mt-3 flex items-center justify-between">
           <p className="text-[12px] text-muted">{filtered.length} preparaciones · el randomizador solo usa las activas.</p>
-          <button className="btn-primary" onClick={() => setEditing({ ...EMPTY, isNew: true })}>+ Nueva preparación</button>
+          <div className="flex gap-2"><button className="btn-ghost" onClick={() => setShowInactive((v) => !v)}>{showInactive ? "Ocultar históricas/inactivas" : "Mostrar históricas/inactivas"}</button><button className="btn-primary" onClick={() => setEditing({ ...EMPTY, isNew: true })}>+ Nueva preparación</button></div>
         </div>
       </section>
 

@@ -3,6 +3,7 @@ import { RULES, allowedBeverages, cycleOrder } from "../rules";
 import { WEEKDAYS } from "../types";
 import { addConsumption, availableQuantity, inventorySummary, recipeConsumptions } from "../supply";
 import { blockingReason, buildContext, buildHistoryIndex, isMeaningfulBase, recencyWeight, weeklyDishKey } from "./context";
+import { weeklyIngredientCapViolations } from "./ingredientFrequency";
 
 export interface ValidateInput {
   items: MenuItem[];
@@ -212,6 +213,14 @@ export function validateMenu(input: ValidateInput): ValidationResult {
   } else {
     issues.push({ level: "ok", rule: "ensaladas", message: "Los 14 almuerzos y cenas incluyen Ensalada a elección." });
   }
+
+  // Frecuencia semanal de ingredientes controlados: máximo 4 servicios por semana.
+  const ingredientCapViolations = weeklyIngredientCapViolations(items, catalog);
+  for (const violation of ingredientCapViolations) {
+    issues.push({ level: "error", rule: "frecuencia-ingrediente", message: `${violation.label}: aparece en ${violation.services} servicios; máximo ${RULES.MAX_INGREDIENT_SERVICES_PER_WEEK} por semana.` });
+  }
+  if (!ingredientCapViolations.length)
+    issues.push({ level: "ok", rule: "frecuencia-ingrediente", message: `Ningún ingrediente controlado supera ${RULES.MAX_INGREDIENT_SERVICES_PER_WEEK} servicios por semana.` });
 
   // Bebidas permitidas por servicio/paridad.
   const badBeverage = mains.filter((i) => !i.beverage || !allowedBeverages(i.service, parity).includes(i.beverage));

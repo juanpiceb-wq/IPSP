@@ -11,6 +11,7 @@ export const RULES = {
   MAX_DAILY_DIFFICULTY: 6,
   GREEN_PLANTAIN_DAYS: 3,
   MIN_PROTEIN_GAP_DAYS: 1,
+  MAX_INGREDIENT_SERVICES_PER_WEEK: 4,
 } as const;
 
 export const SOUP_ONLY_HINT = ["hueso-carnudo", "costilla-res", "pata-res"];

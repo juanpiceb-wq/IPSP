@@ -3,8 +3,9 @@
 import { useMemo, useState } from "react";
 import { blockingReason, buildContext, isMeaningfulBase, weeklyDishKey } from "@/lib/engine/context";
 import { menuStockReason } from "@/lib/engine/validate";
+import { weeklyIngredientCapReason } from "@/lib/engine/ingredientFrequency";
 import { RULES, cycleOrder } from "@/lib/rules";
-import type { Catalog, MenuItem, Parity, Recipe, Service, Weekday } from "@/lib/types";
+import type { Catalog, MainService, MenuItem, Parity, Recipe, Service, Weekday } from "@/lib/types";
 
 interface Props {
   catalog: Catalog;
@@ -97,8 +98,10 @@ export default function RecipePicker({
             if (neighbor) dayReason = `El ingrediente base ${r.base_ingredient} ya se usa en un día consecutivo del ciclo real.`;
           }
         }
+        const mealService: MainService | null = service === "soup" ? "lunch" : service === "salad" ? null : service;
+        const ingredientCapReason = mealService ? weeklyIngredientCapReason(withoutCurrent, r, weekday, mealService, catalog) : null;
         const stockReason = service === "salad" ? null : menuStockReason(withoutCurrent, { recipe_id: r.id }, catalog, diners);
-        return { recipe: r, blocked: hard ?? maxReason ?? dayReason ?? stockReason ?? (familyInWeek ? "Ya existe un plato de esta misma familia en la semana." : null) ?? (inWeek ? "Ya está utilizada en esta semana." : null) };
+        return { recipe: r, blocked: hard ?? maxReason ?? dayReason ?? ingredientCapReason ?? stockReason ?? (familyInWeek ? "Ya existe un plato de esta misma familia en la semana." : null) ?? (inWeek ? "Ya está utilizada en esta semana." : null) };
       })
       .sort((a, b) => Number(!!a.blocked) - Number(!!b.blocked) || a.recipe.name.localeCompare(b.recipe.name, "es"));
   }, [catalog, service, query, weekday, ctx, usedRecipeIds, proteinUseCounts, currentId, items, diners, arrival]);

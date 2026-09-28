@@ -10,7 +10,7 @@ export const SUPPLY_LIMITS: SupplyLimit[] = [
   { key: "protein:atun", label: "Atún Real", quantity_per_person: 1.2, unit: "LATA" },
   { key: "protein:huevo", label: "Huevos", quantity_per_person: 4, unit: "UN" },
   { key: "protein:sardina", label: "Sardina Real", quantity_per_person: 0.6, unit: "LATA" },
-  { key: "protein:fritada", label: "Fritada", quantity_per_person: 1.5, unit: "LB", notes: "Regla operativa vigente: capacidad semanal de 3 servicios completos." },
+  { key: "protein:fritada", label: "Fritada", quantity_per_person: 1.25, unit: "LB", notes: "Maestro final: 125 lb/100 personas; máximo efectivo por stock = 2 servicios completos, aunque el máximo configurado siga siendo 3." },
   { key: "protein:hamburguesa-res", label: "Hamburguesa de res", quantity_per_person: 1, unit: "UN" },
   { key: "protein:chorizo", label: "Chorizo", quantity_per_person: 2.5, unit: "UN" },
   { key: "protein:pollo", label: "Pollo entero", quantity_per_person: 0.2, unit: "POLLO", notes: "Regla operativa vigente: capacidad semanal de hasta 2 servicios completos; el máximo configurado también es 2." },

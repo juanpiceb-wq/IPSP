@@ -1,6 +1,7 @@
 ﻿import type { Catalog, MainService, MenuItem, Parity, Recipe, Weekday, WeeklyMenu } from "../types";
 import { RULES, SUNDAY_PREFERRED_PROTEINS, beverageLabel, cycleOrder } from "../rules";
 import { addConsumption, canConsume } from "../supply";
+import { weeklyIngredientCapReason } from "./ingredientFrequency";
 import {
   EngineContext,
   MAIN_SERVICE_ORDER,
@@ -318,6 +319,9 @@ function candidateList(a: PickArgs): Candidate[] {
       if (dayDifficulty(a.items, a.weekday, a.ctx) + difficulty > RULES.MAX_DAILY_DIFFICULTY) continue;
       if (hasAdjacentBase(a.items, a.weekday, recipe.base_ingredient, a.ctx, a.arrival)) continue;
     }
+
+    const ingredientCapReason = weeklyIngredientCapReason(a.items, recipe, a.weekday, a.service, a.catalog);
+    if (ingredientCapReason) continue;
 
     const stockReason = canConsume(a.ledger, recipe, a.diners);
     if (stockReason) continue;

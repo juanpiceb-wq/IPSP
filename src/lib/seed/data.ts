@@ -34,11 +34,11 @@ export const MASTER_INGREDIENTS: MasterIngredient[] = INGREDIENTS;
 
 /** Catálogo completo: maestro + platos históricos no incluidos + ensaladas. */
 const V2_IDS = new Set(MASTER_RECIPES_V2.map((r) => r.id));
-const HISTORICAL_FALLBACK: Recipe[] = [...OLD_MASTER_RECIPES, ...LEGACY_RECIPES]
+const HISTORICAL_FALLBACK: Recipe[] = [...OLD_MASTER_RECIPES, ...LEGACY_RECIPES, ...SALAD_RECIPES]
   .filter((r) => !V2_IDS.has(r.id))
   .map((r) => ({ ...r, active: false, source: `${r.source} · histórico` }));
 
-/** Solo el maestro v2 + ensaladas está activo para generar. Los IDs viejos se conservan inactivos para leer historial. */
+/** Solo el maestro final está activo para generar. Los IDs viejos y ensaladas históricas se conservan inactivos para leer historial. */
 const LATEST_MASTER_RECIPES: Recipe[] = MASTER_RECIPES_V2.map((r) => {
   // Sardina: solo almuerzo, excepto Corviche de sardina, que también puede ser desayuno.
   if (r.primary_protein_id === "sardina") {
@@ -55,33 +55,7 @@ const LATEST_MASTER_RECIPES: Recipe[] = MASTER_RECIPES_V2.map((r) => {
   return r;
 });
 
-const EXTRA_OPERATIONAL_RECIPES: Recipe[] = [
-  {
-    id: "hamburguesa-de-camaron",
-    name: "Hamburguesa de camarón",
-    primary_protein_id: "hamburguesa-camaron",
-    services: ["breakfast", "lunch", "dinner"],
-    restrictive_product_ids: [],
-    active: true,
-    source: "Regla operativa IPSP",
-    notes: "1 hamburguesa de camarón por persona. Máximo semanal 1.",
-    base_ingredient: "Sin base dominante",
-    difficulty: 1,
-    cooking_method: "Plancha",
-    double_fry: false,
-    sunday_roast: false,
-    base_qty_per_person: null,
-    base_unit: null,
-    protein_qty_per_person: 1,
-    protein_unit: "UN",
-    rice_mode: "default",
-    fixed_weekday: null,
-    fixed_service: null,
-    only_weekday: null,
-  },
-];
-
-export const RECIPES: Recipe[] = [...LATEST_MASTER_RECIPES, ...EXTRA_OPERATIONAL_RECIPES, ...SALAD_RECIPES, ...HISTORICAL_FALLBACK];
+export const RECIPES: Recipe[] = [...LATEST_MASTER_RECIPES, ...HISTORICAL_FALLBACK];
 
 /* ============================ PROTEÍNAS ============================ */
 

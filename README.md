@@ -237,3 +237,11 @@ Para volver a cargar el catálogo desde una versión nueva del Excel: exportar l
 - En almuerzo y cena no se define una receta específica de ensalada: el menú muestra **Ensalada a elección**.
 - Una misma familia de plato no puede repetirse en la misma semana. Ejemplos: cualquier Chaulafán cuenta como una sola familia; cualquier Ceviche cuenta como una sola familia, sin importar la proteína.
 - Los menús pueden editarse y guardarse incluso después de iniciado el ciclo de uso. En menús en ejecución se puede alternar entre **Editar menú** y **Cumplimiento**.
+
+
+### Maestro final IPSP · V5.6
+- Fuente operativa de platos: `MAESTRO_FINAL_IPSP_PLATOS_REGLAS_2026-09-15.xlsx`.
+- El maestro final contiene 155 platos activos. Los platos anteriores se conservan únicamente como históricos/inactivos para no romper menús ya guardados.
+- Las ensaladas ya no se eligen por receta: almuerzo y cena muestran **Ensalada a elección**.
+- Nueva regla acumulativa: un mismo ingrediente controlado puede aparecer como máximo en 4 servicios semanales. El conteo se hace por desayuno/almuerzo/cena y no duplica sopa + plato fuerte del mismo almuerzo. Arroz y bases genéricas quedan excluidos.
+- Se mantiene el resto de reglas vigentes del motor; esta actualización suma reglas y no elimina las anteriores.
