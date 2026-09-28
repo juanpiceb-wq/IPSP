@@ -15,8 +15,8 @@ export const SUPPLY_LIMITS: SupplyLimit[] = [
   { key: "protein:chorizo", label: "Chorizo", quantity_per_person: 2.5, unit: "UN" },
   { key: "protein:pollo", label: "Pollo entero", quantity_per_person: 0.2, unit: "POLLO", notes: "Regla operativa vigente: capacidad semanal de hasta 2 servicios completos; el máximo configurado también es 2." },
   { key: "protein:hueso-carnudo", label: "Hueso carnudo", quantity_per_person: 0.42, unit: "LB" },
-  { key: "protein:costilla-res", label: "Costilla de res", quantity_per_person: 0.2, unit: "LB" },
-  { key: "protein:pata-res", label: "Pata de res", quantity_per_person: 0.2, unit: "LB" },
+  { key: "protein:costilla-res", label: "Costilla de res", quantity_per_person: 0.25, unit: "LB", notes: "Maestro final: máximo efectivo 1 servicio; la hoja de abastecimiento mantiene una alerta de rendimiento 20 lb vs 25 lb teóricas." },
+  { key: "protein:pata-res", label: "Pata de res", quantity_per_person: 0.25, unit: "LB", notes: "Maestro final: máximo efectivo 1 servicio; la hoja de abastecimiento mantiene una alerta de rendimiento 20 lb vs 25 lb teóricas." },
   { key: "meal:camaron", label: "Camarón / Hamburguesa de camarón", quantity_per_person: 1, unit: "SERVICIO", notes: "Hamburguesa de camarón y cualquier preparación de camarón comparten el mismo producto y solo alcanzan para 1 comida semanal." },
   { key: "protein:tilapia", label: "Filete de pescado", quantity_per_person: 0.2, unit: "LB", notes: "Reservado para ceviche dominical." },
 
