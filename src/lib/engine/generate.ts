@@ -1,6 +1,7 @@
 ﻿import type { Catalog, MainService, MenuItem, Parity, Recipe, Weekday, WeeklyMenu } from "../types";
 import { RULES, SUNDAY_PREFERRED_PROTEINS, beverageLabel, cycleOrder } from "../rules";
 import { addConsumption, canConsume } from "../supply";
+import { SALAD_STOCK_ID, finalSaladCatalog, saladIngredientCapReason } from "../salads";
 import { weeklyIngredientCapReason } from "./ingredientFrequency";
 import {
   EngineContext,
@@ -140,7 +141,7 @@ function generateMenuAttempt(input: GenerateInput, seed: string): GenerateOutput
     }
   }
 
-  items.forEach((item) => { if (item.component === "main" && (item.service === "lunch" || item.service === "dinner")) item.salad_recipe_id = null; });
+  assignSalads(items, input, ctx, rng, finalState.usedRecipes);
   items.sort(sortItems);
 
   const missing = items.filter((i) => !i.recipe_id).length;
@@ -484,28 +485,52 @@ function hasAdjacentBase(
 }
 
 function assignSalads(items: MenuItem[], input: GenerateInput, ctx: EngineContext, rng: () => number, usedRecipes: Set<string>) {
+  const order = cycleOrder(input.arrival);
+  const earlyDays = new Set(order.slice(0, 5));
+  const lateDays = order.slice(5, 7);
   const targets = items.filter((i) => i.component === "main" && !!i.recipe_id && (i.service === "lunch" || i.service === "dinner"));
-  const lockedWith = targets.filter((i) => i.locked && i.salad_recipe_id).length;
-  const desired = RULES.SALAD_TARGET;
-  // Los platos D3 son los primeros candidatos a ir sin ensalada. Solo reciben ensalada
-  // si hace falta para alcanzar el mínimo semanal de 10/14.
-  const free = targets
+
+  // Las ensaladas no forman parte del bloqueo del plato fuerte. Al regenerar,
+  // se respetan únicamente las ensaladas de celdas bloqueadas.
+  for (const item of targets) if (!item.locked) item.salad_recipe_id = null;
+
+  // Días 6 y 7 del ciclo: exactamente una "Ensalada según stock" por día.
+  for (const day of lateDays) {
+    const dayItems = targets.filter((i) => i.weekday === day);
+    if (dayItems.some((i) => i.locked && i.salad_recipe_id === SALAD_STOCK_ID)) continue;
+    const free = dayItems
+      .filter((i) => !i.locked)
+      .map((item) => ({ item, difficulty: item.recipe_id ? (ctx.recipesById.get(item.recipe_id)?.difficulty ?? 1) : 1, n: rng() }))
+      .sort((a, b) => a.difficulty - b.difficulty || a.n - b.n);
+    if (free[0]) free[0].item.salad_recipe_id = SALAD_STOCK_ID;
+  }
+
+  // Primeros 5 días: ocho ensaladas específicas entre diez servicios.
+  const earlyTargets = targets.filter((i) => earlyDays.has(i.weekday));
+  const lockedSpecific = earlyTargets.filter((i) => i.locked && i.salad_recipe_id && i.salad_recipe_id !== SALAD_STOCK_ID).length;
+  const needed = Math.max(0, 8 - lockedSpecific);
+  const selectedSlots = earlyTargets
     .filter((i) => !i.locked)
-    .map((x) => ({ x, difficulty: x.recipe_id ? (ctx.recipesById.get(x.recipe_id)?.difficulty ?? 1) : 1, n: rng() }))
+    .map((item) => ({ item, difficulty: item.recipe_id ? (ctx.recipesById.get(item.recipe_id)?.difficulty ?? 1) : 1, n: rng() }))
     .sort((a, b) => a.difficulty - b.difficulty || a.n - b.n)
-    .map((x) => x.x);
-  const needed = Math.max(0, desired - lockedWith);
-  free.forEach((item, idx) => {
-    if (idx >= needed) { item.salad_recipe_id = null; return; }
-    const options = input.catalog.recipes
-      .filter((r) => r.active && r.services.includes("salad") && !usedRecipes.has(r.id) && isEligible(r, "salad", item.weekday, ctx))
-      .map((r) => ({ r, s: 100 - 60 * recencyWeight(ctx.history.recipeAgo.get(r.id)) + rng() * 10 }))
+    .slice(0, needed)
+    .map((x) => x.item);
+
+  const saladCatalog = finalSaladCatalog(input.catalog).filter((r) => r.id !== SALAD_STOCK_ID);
+  for (const item of selectedSlots) {
+    const options = saladCatalog
+      .filter((r) => !usedRecipes.has(r.id))
+      .filter((r) => isEligible(r, "salad", item.weekday, ctx))
+      .filter((r) => !saladIngredientCapReason(items, r.id))
+      .map((r) => ({ r, s: 100 - 60 * recencyWeight(ctx.history.recipeAgo.get(r.id)) + rng() * 20 }))
       .sort((a, b) => b.s - a.s);
     const pick = options[0]?.r;
-    if (pick) { item.salad_recipe_id = pick.id; usedRecipes.add(pick.id); }
-  });
+    if (pick) {
+      item.salad_recipe_id = pick.id;
+      usedRecipes.add(pick.id);
+    }
+  }
 }
-
 
 function mainCapacityDiagnostic(input: GenerateInput) {
   const byOrigin = new Map<string, number>();
@@ -520,7 +545,7 @@ function mainCapacityDiagnostic(input: GenerateInput) {
     if (hardParity !== "todas" && hardParity !== input.parity) continue;
 
     let cap = p.target_frequency;
-    if (p.id === "fritada") cap = Math.min(cap, 3); // Regla operativa vigente: 3 servicios semanales.
+    if (p.id === "fritada") cap = Math.min(cap, 2); // Maestro final: 125 lb/100 permiten 2 servicios completos.
     if (p.id === "sardina") cap = Math.min(cap, 1); // 60 latas/100 = 1 comida completa.
     if (p.id === "tilapia") cap = Math.min(cap, 1); // reservado al ceviche dominical.
     if (p.id === "camaron" || p.id === "hamburguesa-camaron") {
@@ -554,7 +579,7 @@ function mainCapacityDiagnostic(input: GenerateInput) {
 function generationQuality(out: GenerateOutput, input: GenerateInput) {
   const mains = out.items.filter((i) => i.component === "main" && i.recipe_id).length;
   const soups = out.items.filter((i) => i.component === "soup" && i.recipe_id).length;
-  const salads = out.items.filter((i) => i.component === "main" && i.recipe_id && (i.service === "lunch" || i.service === "dinner")).length;
+  const salads = out.items.filter((i) => i.component === "main" && i.recipe_id && i.salad_recipe_id && (i.service === "lunch" || i.service === "dinner")).length;
   const uses = new Map<string, number>();
   out.items.filter((i) => i.component === "main" && i.protein_id).forEach((i) => uses.set(i.protein_id!, (uses.get(i.protein_id!) ?? 0) + 1));
   let targetCoverage = 0;
