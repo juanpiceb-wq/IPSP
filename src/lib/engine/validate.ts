@@ -2,6 +2,7 @@
 import { RULES, allowedBeverages, cycleOrder } from "../rules";
 import { WEEKDAYS } from "../types";
 import { addConsumption, availableQuantity, inventorySummary, recipeConsumptions } from "../supply";
+import { SALAD_STOCK_ID, saladIngredientViolations, saladTimingReason } from "../salads";
 import { blockingReason, buildContext, buildHistoryIndex, isMeaningfulBase, recencyWeight, weeklyDishKey } from "./context";
 import { weeklyIngredientCapViolations } from "./ingredientFrequency";
 
@@ -205,14 +206,66 @@ export function validateMenu(input: ValidateInput): ValidationResult {
   }
   if (!baseRepeats) issues.push({ level: "ok", rule: "base-consecutiva", message: "No se repiten ingredientes base dominantes en días consecutivos." });
 
-  // Ensalada operativa: no se define una receta concreta. Todo almuerzo y cena
-  // muestra "Ensalada a elección" para que la cocina escoja con el producto disponible.
-  const saladCount = lunchDinner.filter((i) => i.recipe_id).length;
-  if (saladCount < RULES.SALAD_SERVICES) {
-    issues.push({ level: "error", rule: "ensaladas", message: `${saladCount}/${RULES.SALAD_SERVICES} servicios de almuerzo/cena completos para ensalada a elección.` });
-  } else {
-    issues.push({ level: "ok", rule: "ensaladas", message: "Los 14 almuerzos y cenas incluyen Ensalada a elección." });
+  // Ensaladas: 8 recetas específicas en los primeros 5 días del ciclo +
+  // 1 "Ensalada según stock" en cada uno de los días 6 y 7 = 10/14.
+  const saladCount = lunchDinner.filter((i) => !!i.salad_recipe_id).length;
+  if (saladCount < RULES.SALAD_MIN)
+    issues.push({ level: "error", rule: "ensaladas", message: `${saladCount}/${RULES.SALAD_SERVICES} servicios con ensalada; se requieren ${RULES.SALAD_TARGET}.` });
+  else if (saladCount > RULES.SALAD_TARGET)
+    issues.push({ level: "warn", rule: "ensaladas", message: `${saladCount}/${RULES.SALAD_SERVICES} servicios con ensalada; el objetivo operativo es ${RULES.SALAD_TARGET}.` });
+  else
+    issues.push({ level: "ok", rule: "ensaladas", message: "10/14 servicios con ensalada: 8 específicas + 2 según stock." });
+
+  const saladSeen = new Set<string>();
+  let earlySpecific = 0;
+  let saladErrors = 0;
+  const orderForSalads = cycleOrder(input.arrival);
+  const earlySaladDays = new Set(orderForSalads.slice(0, 5));
+  const lateSaladDays = orderForSalads.slice(5, 7);
+
+  for (const item of lunchDinner) {
+    if (!item.salad_recipe_id) continue;
+    const salad = catalog.recipes.find((r) => r.id === item.salad_recipe_id);
+    if (!salad || !salad.active || !salad.services.includes("salad")) {
+      saladErrors++;
+      issues.push({ level: "error", rule: "ensalada-catalogo", message: `${WEEKDAYS[item.weekday].label}: la ensalada asignada no pertenece al catálogo activo.`, weekday: item.weekday, service: item.service });
+      continue;
+    }
+    const restriction = blockingReason(salad, "salad", item.weekday, ctx) ?? saladTimingReason(salad.id, item.weekday, input.arrival);
+    if (restriction) {
+      saladErrors++;
+      issues.push({ level: "error", rule: "ensalada-restriccion", message: `${WEEKDAYS[item.weekday].label} · ${item.service === "lunch" ? "almuerzo" : "cena"}: ${restriction}`, weekday: item.weekday, service: item.service });
+    }
+    if (salad.id !== SALAD_STOCK_ID) {
+      if (saladSeen.has(salad.id)) {
+        saladErrors++;
+        issues.push({ level: "error", rule: "ensalada-repetida", message: `${salad.name} se repite; las ensaladas específicas no deben repetirse en la misma semana.` });
+      }
+      saladSeen.add(salad.id);
+      if (earlySaladDays.has(item.weekday)) earlySpecific++;
+    }
   }
+
+  if (earlySpecific !== 8) {
+    saladErrors++;
+    issues.push({ level: "error", rule: "ensalada-primeros-dias", message: `Los primeros 5 días del ciclo deben contener exactamente 8 ensaladas específicas; hay ${earlySpecific}.` });
+  }
+
+  for (const day of lateSaladDays) {
+    const daySalads = lunchDinner.filter((i) => i.weekday === day && i.salad_recipe_id === SALAD_STOCK_ID).length;
+    if (daySalads !== 1) {
+      saladErrors++;
+      issues.push({ level: "error", rule: "ensalada-stock", message: `${WEEKDAYS[day].label}: debe existir exactamente una "Ensalada según stock" en almuerzo o cena.`, weekday: day });
+    }
+  }
+
+  const saladIngredientErrors = saladIngredientViolations(lunchDinner);
+  for (const x of saladIngredientErrors) {
+    saladErrors++;
+    issues.push({ level: "error", rule: "ensalada-ingrediente", message: `${x.label}: aparece en ${x.used} ensaladas; máximo semanal ${x.max} según disponibilidad.` });
+  }
+  if (!saladErrors)
+    issues.push({ level: "ok", rule: "ensalada-reglas", message: "Ensaladas correctas por ciclo, paridad, variedad y límites de ingredientes." });
 
   // Frecuencia semanal de ingredientes controlados: máximo 4 servicios por semana.
   const ingredientCapViolations = weeklyIngredientCapViolations(items, catalog);
