@@ -28,8 +28,9 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
   const [pending,startTransition] = useTransition();
   const [year,setYear] = useState(defaults.year);
   const [week,setWeek] = useState(defaults.week);
-  const [scope,setScope] = useState<"camp"|"zones">("camp");
+  const [scope,setScope] = useState<"camp"|"camps"|"zones">("camp");
   const [campId,setCampId] = useState(defaults.campId || catalog.camps[0]?.id || "");
+  const [campIdsSelected,setCampIdsSelected] = useState<string[]>([]);
   const [zoneIds,setZoneIds] = useState<string[]>([]);
   const [items,setItems] = useState<MenuItem[]>([]);
   const [issues,setIssues] = useState<ValidationIssue[]>([]);
