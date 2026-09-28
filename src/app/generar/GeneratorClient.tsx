@@ -40,6 +40,7 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
   const [saving,setSaving] = useState(false);
   const [message,setMessage] = useState<string|null>(null);
   const [bulkResults,setBulkResults] = useState<BulkCampResult[]>([]);
+  const [manualOverride,setManualOverride] = useState(false);
 
   const parity = parityOfWeek(week);
   const camp = scope === "camp" ? catalog.camps.find(c=>c.id===campId) : undefined;
@@ -77,10 +78,10 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
         if(bulkMode){
           if(!campIds.length) throw new Error("La zona seleccionada no tiene campamentos activos.");
           const res=await actionGenerateBulk({year,week,campIds});
-          setItems(res.items);setIssues(res.issues);setMetrics(res.metrics);setCapacityWarning(res.capacityWarning);setSeed(res.seed);setBulkResults(res.campResults);
+          setItems(res.items);setIssues(res.issues);setMetrics(res.metrics);setCapacityWarning(res.capacityWarning);setSeed(res.seed);setBulkResults(res.campResults);setManualOverride(false);
         }else if(camp){
           const res=await actionGenerate({year,week,campId:camp.id,diners:camp.diners_default,arrival:camp.reception_weekday_default,locked:keepLocked?items.filter(i=>i.locked):[]});
-          setItems(res.items);setIssues(res.issues);setMetrics(res.metrics);setCapacityWarning(res.capacityWarning);setSeed(res.seed);setBulkResults([]);
+          setItems(res.items);setIssues(res.issues);setMetrics(res.metrics);setCapacityWarning(res.capacityWarning);setSeed(res.seed);setBulkResults([]);setManualOverride(false);
         }
       }catch(e){setMessage(e instanceof Error?e.message:"No se pudo generar el menú.");}
     });
@@ -105,20 +106,21 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
       const recipe=catalog.recipes.find(r=>r.id===recipeId);
       return {...i,recipe_id:recipeId,protein_id:recipe?.primary_protein_id??null,reasons:["Selección manual del administrador."]};
     });
-    setCell(null);revalidate(next);
+    setManualOverride(true);setCell(null);revalidate(next);
   }
 
   async function save(status:MenuStatus){
     if(!items.length)return;
-    if((metrics?.errors??0)>0||bulkResults.some(r=>r.errors>0)){setMessage("Corrija los errores críticos antes de guardar como menú definitivo.");if(status==="aprobado")return;}
+    if((metrics?.errors??0)>0||bulkResults.some(r=>r.errors>0)){setMessage(manualOverride?"El menú tiene alertas de reglas, pero la edición manual puede guardarse y aprobarse.":"Corrija las alertas de reglas antes de aprobar, o realice una edición manual si desea asumir la excepción.");if(status==="aprobado"&&!manualOverride)return;}
     setSaving(true);
     try{
-      if(bulkMode){await actionSaveBulkMenus({year,week,campIds,items,status,seed});router.push("/menus");}
-      else if(camp){const d=cycleDates(year,week,camp.reception_weekday_default);const id=await actionSaveMenu({year,week,campId:camp.id,diners:camp.diners_default,arrival:camp.reception_weekday_default,items,status,notes:null,seed,start:d.start,end:d.end,validationScore:metrics?.complianceScore??0,varietyScore:metrics?.varietyScore??0});router.push(`/menus/${id}`);}
+      if(bulkMode){await actionSaveBulkMenus({year,week,campIds,items,status,seed,allowRuleOverride:manualOverride});router.push("/menus");}
+      else if(camp){const d=cycleDates(year,week,camp.reception_weekday_default);const id=await actionSaveMenu({year,week,campId:camp.id,diners:camp.diners_default,arrival:camp.reception_weekday_default,items,status,notes:null,seed,start:d.start,end:d.end,validationScore:metrics?.complianceScore??0,varietyScore:metrics?.varietyScore??0,allowRuleOverride:manualOverride});router.push(`/menus/${id}`);}
     }catch(e){setMessage(e instanceof Error?e.message:"No se pudo guardar el menú.");}finally{setSaving(false);}
   }
 
-  const exportBlocked=(metrics?.errors??0)>0||bulkResults.some(r=>r.errors>0);
+  const hasRuleAlerts=(metrics?.errors??0)>0||bulkResults.some(r=>r.errors>0);
+  const exportBlocked=hasRuleAlerts&&!manualOverride;
   const errorIssues=issues.filter(i=>i.level==="error");
   const warnIssues=issues.filter(i=>i.level==="warn");
   const activeItem=cell?items.find(i=>i.weekday===cell.weekday&&i.service===cell.service&&i.component===cell.component):null;
