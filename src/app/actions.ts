@@ -61,6 +61,7 @@ export interface BulkCampResult {
   campName: string;
   diners: number;
   arrival: Weekday;
+  shiftDays: number;
   errors: number;
   warnings: number;
   varietyScore: number;
@@ -71,7 +72,6 @@ export async function actionGenerateBulk(req: { year: number; week: number; camp
   const [catalog, history] = await Promise.all([repo.getCatalog(), repo.listMenus()]);
   const camps = req.campIds.map((id) => catalog.camps.find((c) => c.id === id)).filter((c): c is Camp => !!c && c.active);
   if (!camps.length) throw new Error("Seleccione al menos un campamento activo.");
-  assertSameReceptionDay(camps);
   const parity = parityOfWeek(req.week);
   let best: { gen: ReturnType<typeof generateMenu>; results: BulkCampResult[]; score: number } | null = null;
 
@@ -83,13 +83,16 @@ export async function actionGenerateBulk(req: { year: number; week: number; camp
       seed: `${req.seed ?? `bulk-${Date.now()}`}-${attempt}`,
     });
     const results = camps.map((camp) => {
+      const shiftDays = weekdayShift(base.reception_weekday_default, camp.reception_weekday_default);
+      // El menú compartido se valida como una secuencia única respecto al día de recepción
+      // del campamento base. Luego cada campamento recibe esa misma secuencia desplazada.
       const v = validateMenu({
-        items: gen.items, catalog, parity, arrival: camp.reception_weekday_default,
+        items: gen.items, catalog, parity, arrival: base.reception_weekday_default,
         year: req.year, week: req.week, campId: camp.id, diners: camp.diners_default, history,
       });
       return {
         campId: camp.id, campName: camp.name, diners: camp.diners_default,
-        arrival: camp.reception_weekday_default, errors: v.metrics.errors,
+        arrival: camp.reception_weekday_default, shiftDays, errors: v.metrics.errors,
         warnings: v.metrics.warnings, varietyScore: v.metrics.varietyScore,
       };
     });
@@ -102,7 +105,7 @@ export async function actionGenerateBulk(req: { year: number; week: number; camp
 
   if (!best) throw new Error("No se pudo generar el menú bulk.");
   if (best.results.some((r) => r.errors > 0)) {
-    throw new Error("No se encontró un menú común que cumpla todas las reglas duras de los campamentos seleccionados. Pruebe un subconjunto con días de recepción compatibles.");
+    throw new Error("No se encontró un menú base que cumpla las reglas para todos los campamentos seleccionados.");
   }
   const primary = camps[0];
   const primaryValidation = validateMenu({
@@ -127,29 +130,30 @@ export async function actionValidateBulk(req: { year: number; week: number; camp
   const parity = parityOfWeek(req.week);
   const selectedCamps = req.campIds.map((id) => catalog.camps.find((c) => c.id === id)).filter((c): c is Camp => !!c && c.active);
   if (!selectedCamps.length) throw new Error("Seleccione al menos un campamento activo.");
-  assertSameReceptionDay(selectedCamps);
+  const base = selectedCamps[0];
   const results: BulkCampResult[] = [];
-  for (const campId of req.campIds) {
-    const camp = catalog.camps.find((c) => c.id === campId && c.active);
-    if (!camp) continue;
-    const v = validateMenu({ items: req.items, catalog, parity, arrival: camp.reception_weekday_default, year: req.year, week: req.week, campId, diners: camp.diners_default, history });
-    results.push({ campId, campName: camp.name, diners: camp.diners_default, arrival: camp.reception_weekday_default, errors: v.metrics.errors, warnings: v.metrics.warnings, varietyScore: v.metrics.varietyScore });
+  for (const camp of selectedCamps) {
+    const shiftDays = weekdayShift(base.reception_weekday_default, camp.reception_weekday_default);
+    const v = validateMenu({ items: req.items, catalog, parity, arrival: base.reception_weekday_default, year: req.year, week: req.week, campId: camp.id, diners: camp.diners_default, history });
+    results.push({ campId: camp.id, campName: camp.name, diners: camp.diners_default, arrival: camp.reception_weekday_default, shiftDays, errors: v.metrics.errors, warnings: v.metrics.warnings, varietyScore: v.metrics.varietyScore });
   }
   const primary = results[0];
   if (!primary) throw new Error("Seleccione al menos un campamento activo.");
-  const primaryCamp = catalog.camps.find((c) => c.id === primary.campId)!;
-  const validation = validateMenu({ items: req.items, catalog, parity, arrival: primaryCamp.reception_weekday_default, year: req.year, week: req.week, campId: primaryCamp.id, diners: primaryCamp.diners_default, history });
+  const validation = validateMenu({ items: req.items, catalog, parity, arrival: base.reception_weekday_default, year: req.year, week: req.week, campId: base.id, diners: base.diners_default, history });
   return { issues: validation.issues, metrics: validation.metrics, campResults: results };
 }
 
 export async function actionValidate(req: {
-  items: MenuItem[]; year: number; week: number; campId: string; arrival: Weekday; diners?: number;
+  items: MenuItem[]; year: number; week: number; campId: string; arrival: Weekday; diners?: number; scheduleShiftDays?: number;
 }) {
   const repo = getRepo();
   const [catalog, history] = await Promise.all([repo.getCatalog(), repo.listMenus()]);
   const camp = catalog.camps.find((c) => c.id === req.campId);
+  const shiftDays = req.scheduleShiftDays ?? 0;
+  const normalizedItems = shiftDays ? shiftMenuItems(req.items, -shiftDays) : req.items;
+  const normalizedArrival = shiftDays ? shiftWeekday(req.arrival, -shiftDays) : req.arrival;
   return validateMenu({
-    items: req.items, catalog, parity: parityOfWeek(req.week), arrival: req.arrival,
+    items: normalizedItems, catalog, parity: parityOfWeek(req.week), arrival: normalizedArrival,
     year: req.year, week: req.week, campId: req.campId,
     diners: req.diners ?? camp?.diners_default ?? 100, history,
   });
@@ -160,16 +164,18 @@ export async function actionSaveMenu(menu: {
   items: MenuItem[]; status: MenuStatus; notes: string | null; seed: string | null;
   start: string | null; end: string | null; validationScore: number; varietyScore: number;
   allowRuleOverride?: boolean;
+  scheduleShiftDays?: number;
 }): Promise<string> {
   const repo = getRepo();
   const id = menu.id ?? newId("menu");
 if (menu.status === "aprobado") {
     const [catalog, history] = await Promise.all([repo.getCatalog(), repo.listMenus()]);
+    const shiftDays = menu.scheduleShiftDays ?? 0;
     const validation = validateMenu({
-      items: menu.items,
+      items: shiftDays ? shiftMenuItems(menu.items, -shiftDays) : menu.items,
       catalog,
       parity: parityOfWeek(menu.week),
-      arrival: menu.arrival,
+      arrival: shiftDays ? shiftWeekday(menu.arrival, -shiftDays) : menu.arrival,
       year: menu.year,
       week: menu.week,
       campId: menu.campId,
@@ -185,6 +191,7 @@ if (menu.status === "aprobado") {
     actual_end_date: menu.end, status: menu.status, validation_score: menu.validationScore,
     variety_score: menu.varietyScore, seed: menu.seed, notes: menu.notes,
     created_at: new Date().toISOString(),
+    schedule_shift_days: menu.scheduleShiftDays ?? 0,
     items: menu.items.map((i) => ({ execution_status: "pending", replacement_name: null, ...i })),
   };
   await repo.saveMenu(record);
@@ -203,27 +210,30 @@ export async function actionSaveBulkMenus(req: {
   if (!selectedCamps.length) throw new Error("Seleccione al menos un campamento activo.");
   assertSameReceptionDay(selectedCamps);
   const saved: { campId: string; menuId: string }[] = [];
-  for (const campId of req.campIds) {
-    const camp = catalog.camps.find((c) => c.id === campId && c.active);
-    if (!camp) continue;
+  const base = selectedCamps[0];
+  for (const camp of selectedCamps) {
+    const shiftDays = weekdayShift(base.reception_weekday_default, camp.reception_weekday_default);
+    const shiftedItems = shiftMenuItems(req.items, shiftDays);
     const validation = validateMenu({
-      items: req.items, catalog, parity, arrival: camp.reception_weekday_default,
-      year: req.year, week: req.week, campId, diners: camp.diners_default, history,
+      items: req.items, catalog, parity, arrival: base.reception_weekday_default,
+      year: req.year, week: req.week, campId: camp.id, diners: camp.diners_default, history,
     });
     if (req.status === "aprobado" && validation.metrics.errors > 0 && !req.allowRuleOverride)
       throw new Error(`${camp.name} tiene ${validation.metrics.errors} alerta(s) de reglas. Revise el menú o use edición manual para aprobarlo bajo criterio del usuario.`);
     const { start, end } = cycleDates(req.year, req.week, camp.reception_weekday_default);
     const menuId = newId("menu");
     await repo.saveMenu({
-      id: menuId, year: req.year, week_number: req.week, parity, camp_id: campId,
+      id: menuId, year: req.year, week_number: req.week, parity, camp_id: camp.id,
       diners: camp.diners_default, supply_arrival_weekday: camp.reception_weekday_default,
       actual_start_date: start, actual_end_date: end, status: req.status,
       validation_score: validation.metrics.complianceScore, variety_score: validation.metrics.varietyScore,
-      seed: req.seed, notes: `Generado en bulk (${req.campIds.length} campamentos).`,
+      seed: req.seed,
+      notes: `Menú compartido base ${base.name}; desplazamiento ${shiftDays} día(s) según recepción de víveres.`,
       created_at: new Date().toISOString(),
-      items: req.items.map((i) => ({ ...i, execution_status: "pending", replacement_name: null })),
+      schedule_shift_days: shiftDays,
+      items: shiftedItems.map((i) => ({ ...i, execution_status: "pending", replacement_name: null })),
     });
-    saved.push({ campId, menuId });
+    saved.push({ campId: camp.id, menuId });
   }
   revalidatePath("/menus"); revalidatePath("/");
   return saved;
@@ -235,11 +245,12 @@ export async function actionSetStatus(id: string, status: MenuStatus) {
     const [menu, catalog, history] = await Promise.all([repo.getMenu(id), repo.getCatalog(), repo.listMenus()]);
     if (!menu) throw new Error("Menú no encontrado.");
     if (menuStarted(menu)) throw new Error("La semana ya inició. El estado del menú está bloqueado.");
+    const shiftDays = menu.schedule_shift_days ?? 0;
     const validation = validateMenu({
-      items: menu.items,
+      items: shiftDays ? shiftMenuItems(menu.items, -shiftDays) : menu.items,
       catalog,
       parity: parityOfWeek(menu.week_number),
-      arrival: menu.supply_arrival_weekday,
+      arrival: shiftDays ? shiftWeekday(menu.supply_arrival_weekday, -shiftDays) : menu.supply_arrival_weekday,
       year: menu.year,
       week: menu.week_number,
       campId: menu.camp_id,
@@ -273,6 +284,7 @@ export async function actionDuplicateMenu(id: string, year: number, week: number
     ...src, id: newIdValue, year, week_number: week, parity: parityOfWeek(week), status: "borrador",
     actual_start_date: start, actual_end_date: end, created_at: new Date().toISOString(),
     notes: `Duplicado de la semana ${src.week_number}. Revalide las reglas de la nueva semana.`,
+    schedule_shift_days: 0,
     items: src.items.map((i) => ({ ...i, locked: false, execution_status: "pending", replacement_name: null })),
   });
   revalidatePath("/menus"); return newIdValue;
@@ -352,10 +364,17 @@ export async function actionDeleteZone(id: string) {
   revalidatePath("/campamentos"); revalidatePath("/generar"); revalidatePath("/");
 }
 
-function assertSameReceptionDay(camps: Camp[]) {
-  const days = Array.from(new Set(camps.map((c) => c.reception_weekday_default)));
-  if (days.length > 1)
-    throw new Error("Las zonas/campamentos seleccionados deben recibir los víveres el mismo día para compartir un mismo menú.");
+function shiftWeekday(day: Weekday, delta: number): Weekday {
+  return (((day + delta) % 7 + 7) % 7) as Weekday;
+}
+
+function weekdayShift(baseArrival: Weekday, targetArrival: Weekday) {
+  return ((targetArrival - baseArrival) % 7 + 7) % 7;
+}
+
+function shiftMenuItems(items: MenuItem[], delta: number): MenuItem[] {
+  if (!delta) return items.map((i) => ({ ...i }));
+  return items.map((i) => ({ ...i, weekday: shiftWeekday(i.weekday, delta) }));
 }
 
 function menuStarted(menu: WeeklyMenu) {
