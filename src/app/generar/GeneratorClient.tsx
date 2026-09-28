@@ -47,9 +47,9 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
   const activeCamps = catalog.camps.filter(c=>c.active);
   const camp = scope === "camp" ? activeCamps.find(c=>c.id===campId) : undefined;
   const activeZones = catalog.zones.filter(z=>z.active);
-  const selectedZones = activeZones.filter(z=>zoneIds.includes(z.id));
+  const selectedZones = zoneIds.map(id=>activeZones.find(z=>z.id===id)).filter(Boolean) as typeof activeZones;
   const zoneCampMap = new Map(activeZones.map(z=>[z.id,activeCamps.filter(c=>c.zone_id===z.id)]));
-  const selectedMultiCamps = campIdsSelected.map(id=>activeCamps.find(c=>c.id===id)).filter((x): x is NonNullable<typeof x>=>!!x);
+  const selectedMultiCamps = campIdsSelected.map(id=>activeCamps.find(c=>c.id===id)).filter(Boolean) as typeof activeCamps;
   const zoneCamps = selectedZones.flatMap(z=>zoneCampMap.get(z.id) ?? []);
   const bulkMode = scope !== "camp";
   const bulkCamps = scope === "camps" ? selectedMultiCamps : zoneCamps;
@@ -181,7 +181,7 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
         {bulkMode&&bulkCamps.length?<><span className="chip-info">{scope==="camps"?"Campamentos":"Zonas"}: {bulkLabel}</span><span className="chip-muted">{bulkCamps.length} campamentos</span><span className="chip-muted">Base: {baseCamp?.name} · víveres {WEEKDAYS[arrival].label}</span><span className="text-muted">Misma secuencia; cada campamento se desplaza automáticamente según su recepción.</span></>:null}
         {items.length?<div className="ml-auto flex gap-2"><button className="btn-ghost btn-sm" onClick={()=>generate(false)} disabled={pending}>Otra opción</button>{!bulkMode?<button className="btn-ghost btn-sm" onClick={()=>generate(true)} disabled={pending}>Regenerar no bloqueados</button>:null}</div>:null}
       </div>
-      {bulkMode&&bulkResults.length?<div className="mt-3 flex flex-wrap gap-2 text-[11px]">{bulkResults.map(r=><span key={r.campId} className="chip-muted">{r.campName}: {WEEKDAYS[r.arrival].label}{r.shiftDays?` · +${r.shiftDays} día${r.shiftDays===1?"":"s"}`:" · base"}</span>)}</div>:null}
+      {bulkMode&&bulkResults.length?<div className="mt-3 flex flex-wrap gap-2 text-[11px]">{bulkResults.map(r=><span key={r.campId} className="chip-muted">{r.campName}: {WEEKDAYS[r.arrival].label}{r.shiftDays?` · ${r.shiftDays>0?"+":""}${r.shiftDays} día${Math.abs(r.shiftDays)===1?"":"s"}`:" · base"}</span>)}</div>:null}
     </section>
 
     {message?<div className="notice-warn">{message}</div>:null}
