@@ -160,6 +160,8 @@ export interface WeeklyMenu {
   seed: string | null;
   notes: string | null;
   created_at: string;
+  /** Días que este menú fue desplazado respecto al menú base compartido. */
+  schedule_shift_days?: number;
   items: MenuItem[];
 }
 
