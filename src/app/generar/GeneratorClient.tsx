@@ -44,27 +44,21 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
   const [manualOverride,setManualOverride] = useState(false);
 
   const parity = parityOfWeek(week);
-  const camp = scope === "camp" ? catalog.camps.find(c=>c.id===campId) : undefined;
+  const activeCamps = catalog.camps.filter(c=>c.active);
+  const camp = scope === "camp" ? activeCamps.find(c=>c.id===campId) : undefined;
   const activeZones = catalog.zones.filter(z=>z.active);
   const selectedZones = activeZones.filter(z=>zoneIds.includes(z.id));
-  const zoneCampMap = new Map(activeZones.map(z=>[
-    z.id,
-    catalog.camps.filter(c=>c.active && c.zone_id===z.id)
-  ]));
-  const zoneArrival = (zoneId:string) => {
-    const camps = zoneCampMap.get(zoneId) ?? [];
-    const days = Array.from(new Set(camps.map(c=>c.reception_weekday_default)));
-    return days.length === 1 ? days[0] as Weekday : null;
-  };
-  const selectedArrival = selectedZones.length ? zoneArrival(selectedZones[0].id) : null;
+  const zoneCampMap = new Map(activeZones.map(z=>[z.id,activeCamps.filter(c=>c.zone_id===z.id)]));
+  const selectedMultiCamps = campIdsSelected.map(id=>activeCamps.find(c=>c.id===id)).filter((x): x is NonNullable<typeof x>=>!!x);
   const zoneCamps = selectedZones.flatMap(z=>zoneCampMap.get(z.id) ?? []);
-  const bulkMode = scope === "zones";
-  const campIds = bulkMode ? Array.from(new Set(zoneCamps.map(c=>c.id))) : camp ? [camp.id] : [];
-  const arrival = (camp?.reception_weekday_default ?? selectedArrival ?? 1) as Weekday;
-  const diners = camp?.diners_default ?? zoneCamps[0]?.diners_default ?? 100;
+  const bulkMode = scope !== "camp";
+  const bulkCamps = scope === "camps" ? selectedMultiCamps : zoneCamps;
+  const campIds = bulkMode ? Array.from(new Set(bulkCamps.map(c=>c.id))) : camp ? [camp.id] : [];
+  const baseCamp = bulkMode ? bulkCamps[0] : camp;
+  const arrival = (baseCamp?.reception_weekday_default ?? 1) as Weekday;
+  const diners = baseCamp?.diners_default ?? 100;
   const dates = cycleDates(year,week,arrival);
-  const zonesCompatible = !bulkMode || (selectedZones.length > 0 && selectedArrival !== null && selectedZones.every(z=>zoneArrival(z.id)===selectedArrival));
-  const bulkLabel = selectedZones.map(z=>z.name).join(" + ");
+  const bulkLabel = scope === "camps" ? selectedMultiCamps.map(c=>c.name).join(" + ") : selectedZones.map(z=>z.name).join(" + ");
 
   const usedRecipeIds = useMemo(()=>items.flatMap(i=>[i.recipe_id,i.salad_recipe_id].filter(Boolean) as string[]),[items]);
   const proteinUseCounts = useMemo(()=>{const x:Record<string,number>={};items.forEach(i=>{if(i.protein_id)x[i.protein_id]=(x[i.protein_id]??0)+1});return x;},[items]);
