@@ -5,6 +5,7 @@ import { blockingReason, buildContext, isMeaningfulBase, weeklyDishKey } from "@
 import { menuStockReason } from "@/lib/engine/validate";
 import { weeklyIngredientCapReason } from "@/lib/engine/ingredientFrequency";
 import { RULES, cycleOrder } from "@/lib/rules";
+import { saladIngredientCapReason, saladTimingReason } from "@/lib/salads";
 import type { Catalog, MainService, MenuItem, Parity, Recipe, Service, Weekday } from "@/lib/types";
 
 interface Props {
@@ -44,6 +45,9 @@ export default function RecipePicker({
       .filter((r) => q ? `${r.name} ${r.base_ingredient ?? ""}`.toLocaleLowerCase("es").includes(q) : true)
       .map((r) => {
         const hard = blockingReason(r, service, weekday, ctx);
+        const saladRule = service === "salad"
+          ? saladTimingReason(r.id, weekday, arrival) ?? saladIngredientCapReason(withoutCurrent, r.id)
+          : null;
         const inWeek = usedRecipeIds.includes(r.id) && r.id !== currentId;
         const dishKey = weeklyDishKey(r.name);
         const familyInWeek = withoutCurrent.some((i) => {
@@ -101,7 +105,7 @@ export default function RecipePicker({
         const mealService: MainService | null = service === "soup" ? "lunch" : service === "salad" ? null : service;
         const ingredientCapReason = mealService ? weeklyIngredientCapReason(withoutCurrent, r, weekday, mealService, catalog) : null;
         const stockReason = service === "salad" ? null : menuStockReason(withoutCurrent, { recipe_id: r.id }, catalog, diners);
-        return { recipe: r, blocked: hard ?? maxReason ?? dayReason ?? ingredientCapReason ?? stockReason ?? (familyInWeek ? "Ya existe un plato de esta misma familia en la semana." : null) ?? (inWeek ? "Ya está utilizada en esta semana." : null) };
+        return { recipe: r, blocked: hard ?? saladRule ?? maxReason ?? dayReason ?? ingredientCapReason ?? stockReason ?? (familyInWeek ? "Ya existe un plato de esta misma familia en la semana." : null) ?? (inWeek ? "Ya está utilizada en esta semana." : null) };
       })
       .sort((a, b) => Number(!!a.blocked) - Number(!!b.blocked) || a.recipe.name.localeCompare(b.recipe.name, "es"));
   }, [catalog, service, query, weekday, ctx, usedRecipeIds, proteinUseCounts, currentId, items, diners, arrival]);
