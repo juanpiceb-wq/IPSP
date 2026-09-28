@@ -75,7 +75,7 @@ export function buildMenuPdf(input: ExportMenuPdfInput): Uint8Array {
       const item = find(d.value, service, component);
       if (!item) return "-";
       if (field === "recipe") return recipeName(item.recipe_id) || "-";
-      if (field === "salad") return "Ensalada a elección";
+      if (field === "salad") return recipeName(item.salad_recipe_id) || "Sin ensalada";
       return item.beverage || "-";
     });
 
