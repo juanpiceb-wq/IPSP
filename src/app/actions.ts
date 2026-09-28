@@ -208,7 +208,6 @@ export async function actionSaveBulkMenus(req: {
   const parity = parityOfWeek(req.week);
   const selectedCamps = req.campIds.map((id) => catalog.camps.find((c) => c.id === id)).filter((c): c is Camp => !!c && c.active);
   if (!selectedCamps.length) throw new Error("Seleccione al menos un campamento activo.");
-  assertSameReceptionDay(selectedCamps);
   const saved: { campId: string; menuId: string }[] = [];
   const base = selectedCamps[0];
   for (const camp of selectedCamps) {
