@@ -127,35 +127,52 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
         <div><label className="label">Semana</label><input type="number" min={1} max={53} className="input" value={week} onChange={e=>setWeek(Number(e.target.value))}/></div>
         <div className="space-y-2">
           <label className="label">Planificar para</label>
-          <div className="flex gap-2">
-            <button type="button" className={`btn-ghost btn-sm ${scope==="camp"?"bg-corp-100":""}`} onClick={()=>{setScope("camp");setZoneIds([]);setItems([]);setMessage(null)}}>Campamento</button>
-            <button type="button" className={`btn-ghost btn-sm ${scope==="zones"?"bg-corp-100":""}`} onClick={()=>{setScope("zones");setItems([]);setMessage(null)}}>Una o más zonas</button>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className={`btn-ghost btn-sm ${scope==="camp"?"bg-corp-100":""}`} onClick={()=>{setScope("camp");setCampIdsSelected([]);setZoneIds([]);setItems([]);setMessage(null)}}>Un campamento</button>
+            <button type="button" className={`btn-ghost btn-sm ${scope==="camps"?"bg-corp-100":""}`} onClick={()=>{setScope("camps");setZoneIds([]);setItems([]);setMessage(null)}}>Varios campamentos</button>
+            <button type="button" className={`btn-ghost btn-sm ${scope==="zones"?"bg-corp-100":""}`} onClick={()=>{setScope("zones");setCampIdsSelected([]);setItems([]);setMessage(null)}}>Una o más zonas</button>
           </div>
           {scope==="camp"?
             <select className="input" value={campId} onChange={e=>{setCampId(e.target.value);setItems([]);setMessage(null)}}>
-              {catalog.camps.filter(c=>c.active).map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+              {activeCamps.map(c=><option key={c.id} value={c.id}>{c.name} · víveres {WEEKDAYS[c.reception_weekday_default].label}</option>)}
             </select>
+          :scope==="camps"?
+            <div className="rounded-lg border border-line bg-white p-2">
+              <div className="grid gap-1 sm:grid-cols-2">
+                {activeCamps.map(campOption=>{
+                  const selected=campIdsSelected.includes(campOption.id);
+                  return <label key={campOption.id} className="flex items-center gap-2 rounded-md px-2 py-2 text-sm">
+                    <input type="checkbox" checked={selected} onChange={()=>{
+                      setCampIdsSelected(prev=>selected?prev.filter(id=>id!==campOption.id):[...prev,campOption.id]);
+                      setItems([]);setMessage(null);
+                    }}/>
+                    <span className="flex-1">{campOption.name}</span>
+                    <span className="text-[11px] text-muted">{WEEKDAYS[campOption.reception_weekday_default].label}</span>
+                  </label>;
+                })}
+              </div>
+              <p className="mt-2 text-[11px] text-muted">El primer campamento seleccionado define el menú base. Los demás se desplazan automáticamente según su día de recepción.</p>
+            </div>
           :
             <div className="rounded-lg border border-line bg-white p-2">
               <div className="grid gap-1 sm:grid-cols-2">
                 {activeZones.map(z=>{
-                  const day=zoneArrival(z.id);
                   const selected=zoneIds.includes(z.id);
-                  const compatible=day!==null && (selectedArrival===null || day===selectedArrival || selected);
-                  return <label key={z.id} className={`flex items-center gap-2 rounded-md px-2 py-2 text-sm ${!compatible?"opacity-45":""}`}>
-                    <input type="checkbox" checked={selected} disabled={!compatible&&!selected} onChange={()=>{
+                  const camps=zoneCampMap.get(z.id)??[];
+                  const days=Array.from(new Set(camps.map(c=>c.reception_weekday_default))).map(d=>WEEKDAYS[d].short).join(", ");
+                  return <label key={z.id} className="flex items-center gap-2 rounded-md px-2 py-2 text-sm">
+                    <input type="checkbox" checked={selected} onChange={()=>{
                       setZoneIds(prev=>selected?prev.filter(id=>id!==z.id):[...prev,z.id]);
                       setItems([]);setMessage(null);
                     }}/>
                     <span className="flex-1">{z.name}</span>
-                    <span className="text-[11px] text-muted">{day===null?"Recepción mixta":WEEKDAYS[day].label}</span>
+                    <span className="text-[11px] text-muted">{camps.length} camp. · {days||"sin recepción"}</span>
                   </label>;
                 })}
               </div>
-              <p className="mt-2 text-[11px] text-muted">Solo se pueden combinar zonas cuyos campamentos reciben víveres el mismo día.</p>
+              <p className="mt-2 text-[11px] text-muted">Puede combinar zonas aunque reciban víveres en días distintos. Cada campamento recibe el mismo menú desplazado a su calendario.</p>
             </div>
-          }
-        </div>
+          }        </div>
         <button className="btn-primary h-[42px]" onClick={()=>generate(false)} disabled={pending||(scope==="camp"?!camp:scope==="camps"?!campIdsSelected.length:!zoneIds.length)}>{pending?"Generando…":"Generar menú"}</button>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-4 text-xs">
