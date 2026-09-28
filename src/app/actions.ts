@@ -159,6 +159,7 @@ export async function actionSaveMenu(menu: {
   id?: string; year: number; week: number; campId: string; diners: number; arrival: Weekday;
   items: MenuItem[]; status: MenuStatus; notes: string | null; seed: string | null;
   start: string | null; end: string | null; validationScore: number; varietyScore: number;
+  allowRuleOverride?: boolean;
 }): Promise<string> {
   const repo = getRepo();
   const id = menu.id ?? newId("menu");
@@ -175,8 +176,8 @@ if (menu.status === "aprobado") {
       diners: menu.diners,
       history: history.filter((m) => m.id !== menu.id),
     });
-    if (validation.metrics.errors > 0)
-      throw new Error(`El menú tiene ${validation.metrics.errors} error(es) críticos y no puede aprobarse.`);
+    if (validation.metrics.errors > 0 && !menu.allowRuleOverride)
+      throw new Error(`El menú tiene ${validation.metrics.errors} alerta(s) de reglas. Revise el menú o use edición manual para aprobarlo bajo criterio del usuario.`);
   }
   const record: WeeklyMenu = {
     id, year: menu.year, week_number: menu.week, parity: parityOfWeek(menu.week), camp_id: menu.campId,
@@ -193,6 +194,7 @@ if (menu.status === "aprobado") {
 
 export async function actionSaveBulkMenus(req: {
   year: number; week: number; campIds: string[]; items: MenuItem[]; status: MenuStatus; seed: string | null;
+  allowRuleOverride?: boolean;
 }) {
   const repo = getRepo();
   const [catalog, history] = await Promise.all([repo.getCatalog(), repo.listMenus()]);
@@ -208,8 +210,8 @@ export async function actionSaveBulkMenus(req: {
       items: req.items, catalog, parity, arrival: camp.reception_weekday_default,
       year: req.year, week: req.week, campId, diners: camp.diners_default, history,
     });
-    if (req.status === "aprobado" && validation.metrics.errors > 0)
-      throw new Error(`${camp.name} tiene ${validation.metrics.errors} error(es) críticos; no se puede aprobar el lote.`);
+    if (req.status === "aprobado" && validation.metrics.errors > 0 && !req.allowRuleOverride)
+      throw new Error(`${camp.name} tiene ${validation.metrics.errors} alerta(s) de reglas. Revise el menú o use edición manual para aprobarlo bajo criterio del usuario.`);
     const { start, end } = cycleDates(req.year, req.week, camp.reception_weekday_default);
     const menuId = newId("menu");
     await repo.saveMenu({
