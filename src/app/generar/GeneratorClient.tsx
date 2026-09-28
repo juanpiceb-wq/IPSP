@@ -68,10 +68,10 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
     startTransition(async()=>{
       try{
         if(scope==="camp" && !camp) throw new Error("Seleccione un campamento.");
+        if(scope==="camps" && !campIdsSelected.length) throw new Error("Seleccione al menos un campamento.");
         if(scope==="zones" && !zoneIds.length) throw new Error("Seleccione al menos una zona.");
-        if(scope==="zones" && !zonesCompatible) throw new Error("Las zonas seleccionadas deben recibir los víveres el mismo día.");
         if(bulkMode){
-          if(!campIds.length) throw new Error("La zona seleccionada no tiene campamentos activos.");
+          if(!campIds.length) throw new Error("La selección no tiene campamentos activos.");
           const res=await actionGenerateBulk({year,week,campIds});
           setItems(res.items);setIssues(res.issues);setMetrics(res.metrics);setCapacityWarning(res.capacityWarning);setSeed(res.seed);setBulkResults(res.campResults);setManualOverride(false);
         }else if(camp){
@@ -156,7 +156,7 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
             </div>
           }
         </div>
-        <button className="btn-primary h-[42px]" onClick={()=>generate(false)} disabled={pending||(scope==="camp"?!camp:!zoneIds.length||!zonesCompatible)}>{pending?"Generando…":"Generar menú"}</button>
+        <button className="btn-primary h-[42px]" onClick={()=>generate(false)} disabled={pending||(scope==="camp"?!camp:scope==="camps"?!campIdsSelected.length:!zoneIds.length)}>{pending?"Generando…":"Generar menú"}</button>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-4 text-xs">
         <span className={`chip ${parity==="par"?"chip-dark":"chip-info"}`}>SEMANA {parity.toUpperCase()}</span>
