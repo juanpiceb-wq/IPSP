@@ -41,7 +41,12 @@ export default function RecipePicker({
     const withoutCurrent = removeCurrent(items, currentId);
 
     return catalog.recipes
-      .filter((r) => r.services.includes(service))
+      .filter((r) => r.active)
+      .filter((r) => service === "salad"
+        ? r.services.includes("salad")
+        : service === "soup"
+        ? r.services.includes("soup")
+        : !r.services.includes("soup") && !r.services.includes("salad"))
       .filter((r) => q ? `${r.name} ${r.base_ingredient ?? ""}`.toLocaleLowerCase("es").includes(q) : true)
       .map((r) => {
         const hard = blockingReason(r, service, weekday, ctx);
@@ -119,7 +124,7 @@ export default function RecipePicker({
         <input className="input flex-1" placeholder="Buscar preparación…" value={query} onChange={(e) => setQuery(e.target.value)} />
         {allowEmpty ? <button type="button" className="btn-ghost" onClick={() => onPick(null)}>Sin ensalada</button> : null}
       </div>
-      <p className="mt-3 text-[12px] text-muted">{valid.length} preparación(es) válida(s) para este espacio.</p>
+      <p className="mt-3 text-[12px] text-muted">{valid.length} preparación(es) sin alertas para este espacio. Las preparaciones con alerta también pueden seleccionarse manualmente.</p>
       <ul className="mt-2 space-y-1.5">
         {valid.map(({ recipe }) => (
           <li key={recipe.id}>
@@ -141,7 +146,7 @@ export default function RecipePicker({
       {invalid.length ? (
         <div className="mt-4">
           <button type="button" className="text-[12px] font-semibold text-corp-600 underline" onClick={() => setShowInvalid((v) => !v)}>{showInvalid ? "Ocultar" : "Ver"} {invalid.length} preparación(es) no disponible(s)</button>
-          {showInvalid ? <ul className="mt-2 space-y-1">{invalid.map(({ recipe, blocked }) => <li key={recipe.id} className="rounded-lg border border-line bg-shell px-3 py-2 text-[12px] text-muted"><span className="font-semibold text-navy-800/70">{recipe.name}</span> — {blocked}</li>)}</ul> : null}
+          {showInvalid ? <ul className="mt-2 space-y-1">{invalid.map(({ recipe, blocked }) => <li key={recipe.id}><button type="button" onClick={() => onPick(recipe.id)} className="w-full rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-[12px] text-amber-900 transition hover:border-amber-300 hover:bg-amber-100"><div className="font-semibold text-navy-800">{recipe.name}</div><div className="mt-1"><strong>Alerta:</strong> {blocked}</div><div className="mt-1 font-semibold">Seleccionar de todos modos</div></button></li>)}</ul> : null}
         </div>
       ) : null}
     </div>
