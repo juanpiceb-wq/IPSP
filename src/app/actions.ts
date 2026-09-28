@@ -368,7 +368,10 @@ function shiftWeekday(day: Weekday, delta: number): Weekday {
 }
 
 function weekdayShift(baseArrival: Weekday, targetArrival: Weekday) {
-  return ((targetArrival - baseArrival) % 7 + 7) % 7;
+  let delta = targetArrival - baseArrival;
+  if (delta > 3) delta -= 7;
+  if (delta < -3) delta += 7;
+  return delta;
 }
 
 function shiftMenuItems(items: MenuItem[], delta: number): MenuItem[] {
