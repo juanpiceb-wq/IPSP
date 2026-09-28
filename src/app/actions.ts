@@ -71,6 +71,7 @@ export async function actionGenerateBulk(req: { year: number; week: number; camp
   const [catalog, history] = await Promise.all([repo.getCatalog(), repo.listMenus()]);
   const camps = req.campIds.map((id) => catalog.camps.find((c) => c.id === id)).filter((c): c is Camp => !!c && c.active);
   if (!camps.length) throw new Error("Seleccione al menos un campamento activo.");
+  assertSameReceptionDay(camps);
   const parity = parityOfWeek(req.week);
   let best: { gen: ReturnType<typeof generateMenu>; results: BulkCampResult[]; score: number } | null = null;
 
@@ -124,6 +125,9 @@ export async function actionValidateBulk(req: { year: number; week: number; camp
   const repo = getRepo();
   const [catalog, history] = await Promise.all([repo.getCatalog(), repo.listMenus()]);
   const parity = parityOfWeek(req.week);
+  const selectedCamps = req.campIds.map((id) => catalog.camps.find((c) => c.id === id)).filter((c): c is Camp => !!c && c.active);
+  if (!selectedCamps.length) throw new Error("Seleccione al menos un campamento activo.");
+  assertSameReceptionDay(selectedCamps);
   const results: BulkCampResult[] = [];
   for (const campId of req.campIds) {
     const camp = catalog.camps.find((c) => c.id === campId && c.active);
@@ -193,6 +197,9 @@ export async function actionSaveBulkMenus(req: {
   const repo = getRepo();
   const [catalog, history] = await Promise.all([repo.getCatalog(), repo.listMenus()]);
   const parity = parityOfWeek(req.week);
+  const selectedCamps = req.campIds.map((id) => catalog.camps.find((c) => c.id === id)).filter((c): c is Camp => !!c && c.active);
+  if (!selectedCamps.length) throw new Error("Seleccione al menos un campamento activo.");
+  assertSameReceptionDay(selectedCamps);
   const saved: { campId: string; menuId: string }[] = [];
   for (const campId of req.campIds) {
     const camp = catalog.camps.find((c) => c.id === campId && c.active);
@@ -341,6 +348,12 @@ export async function actionDeleteZone(id: string) {
   assertGeneralAdmin();
   await getRepo().deleteZone(id);
   revalidatePath("/campamentos"); revalidatePath("/generar"); revalidatePath("/");
+}
+
+function assertSameReceptionDay(camps: Camp[]) {
+  const days = Array.from(new Set(camps.map((c) => c.reception_weekday_default)));
+  if (days.length > 1)
+    throw new Error("Las zonas/campamentos seleccionados deben recibir los víveres el mismo día para compartir un mismo menú.");
 }
 
 function menuStarted(menu: WeeklyMenu) {
