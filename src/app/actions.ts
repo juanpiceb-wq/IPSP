@@ -97,58 +97,53 @@ export interface BulkCampResult {
 
 export async function actionGenerateBulk(req: { year: number; week: number; campIds: string[]; seed?: string }) {
   const repo = getRepo();
-  const [catalog, history] = await Promise.all([repo.getCatalog(), repo.listMenus()]);
+  const [catalog, history] = await Promise.all([
+    repo.getCatalog(),
+    repo.listMenus({ limit: RULES.HISTORY_WEEKS + 2 }),
+  ]);
   const camps = req.campIds.map((id) => catalog.camps.find((c) => c.id === id)).filter((c): c is Camp => !!c && c.active);
   if (!camps.length) throw new Error("Seleccione al menos un campamento activo.");
+
+  const base = camps[0];
   const parity = parityOfWeek(req.week);
-  let best: { gen: ReturnType<typeof generateMenu>; results: BulkCampResult[]; score: number } | null = null;
+  console.log("[generate-ai-bulk] start", { camps: camps.length, year: req.year, week: req.week });
 
-  for (let attempt = 0; attempt < 80; attempt++) {
-    const base = camps[0];
-    const gen = generateMenu({
-      year: req.year, week: req.week, parity, campId: "", diners: base.diners_default,
-      arrival: base.reception_weekday_default, catalog, history,
-      seed: `${req.seed ?? `bulk-${Date.now()}`}-${attempt}`,
-    });
-    const results = camps.map((camp) => {
-      const shiftDays = weekdayShift(base.reception_weekday_default, camp.reception_weekday_default);
-      // El menú compartido se valida como una secuencia única respecto al día de recepción
-      // del campamento base. Luego cada campamento recibe esa misma secuencia desplazada.
-      const v = validateMenu({
-        items: gen.items, catalog, parity, arrival: base.reception_weekday_default,
-        year: req.year, week: req.week, campId: camp.id, diners: camp.diners_default, history,
-      });
-      return {
-        campId: camp.id, campName: camp.name, diners: camp.diners_default,
-        arrival: camp.reception_weekday_default, shiftDays, errors: v.metrics.errors,
-        warnings: v.metrics.warnings, varietyScore: v.metrics.varietyScore,
-      };
-    });
-    const errors = results.reduce((s, r) => s + r.errors, 0);
-    const avgVariety = results.reduce((s, r) => s + r.varietyScore, 0) / results.length;
-    const score = -errors * 10000 + avgVariety;
-    if (!best || score > best.score) best = { gen, results, score };
-    if (errors === 0 && avgVariety >= 75) break;
-  }
-
-  if (!best) throw new Error("No se pudo generar el menú bulk.");
-  if (best.results.some((r) => r.errors > 0)) {
-    throw new Error("No se encontró un menú base que cumpla las reglas para todos los campamentos seleccionados.");
-  }
-  const primary = camps[0];
-  const primaryValidation = validateMenu({
-    items: best.gen.items, catalog, parity, arrival: primary.reception_weekday_default,
-    year: req.year, week: req.week, campId: primary.id, diners: primary.diners_default, history,
+  // La IA construye una sola secuencia base. Los demás campamentos reciben esa misma
+  // secuencia desplazada según su día de recepción, igual que en el flujo bulk existente.
+  const ai = await generateMenuWithAI({
+    year: req.year, week: req.week, parity, campId: base.id, diners: base.diners_default,
+    arrival: base.reception_weekday_default, catalog, history,
   });
+
+  const results = camps.map((camp) => {
+    const shiftDays = weekdayShift(base.reception_weekday_default, camp.reception_weekday_default);
+    const v = validateMenu({
+      items: ai.items, catalog, parity, arrival: base.reception_weekday_default,
+      year: req.year, week: req.week, campId: camp.id, diners: camp.diners_default, history,
+    });
+    return {
+      campId: camp.id, campName: camp.name, diners: camp.diners_default,
+      arrival: camp.reception_weekday_default, shiftDays, errors: v.metrics.errors,
+      warnings: v.metrics.warnings, varietyScore: v.metrics.varietyScore,
+    };
+  });
+
+  const primaryValidation = validateMenu({
+    items: ai.items, catalog, parity, arrival: base.reception_weekday_default,
+    year: req.year, week: req.week, campId: base.id, diners: base.diners_default, history,
+  });
+  const totalErrors = results.reduce((sum, row) => sum + row.errors, 0);
+  console.log("[generate-ai-bulk] ready", { camps: camps.length, totalErrors });
+
   return {
-    items: best.gen.items,
-    seed: best.gen.seed,
+    items: ai.items,
+    seed: ai.seed,
     issues: primaryValidation.issues,
     metrics: primaryValidation.metrics,
-    capacityWarning: best.results.some((r) => r.errors > 0)
-      ? "No se encontró una combinación común sin errores para todos los campamentos seleccionados. Revise el detalle bulk antes de guardar."
+    capacityWarning: totalErrors
+      ? `La IA generó el menú común, pero el validador detectó ${totalErrors} incumplimiento(s) entre los campamentos seleccionados. Puede revisar y ajustar los espacios marcados.`
       : null,
-    campResults: best.results,
+    campResults: results,
   };
 }
 
