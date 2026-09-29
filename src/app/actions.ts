@@ -110,15 +110,15 @@ export async function actionGenerateBulk(req: { year: number; week: number; camp
 
   // La IA construye una sola secuencia base. Los demás campamentos reciben esa misma
   // secuencia desplazada según su día de recepción, igual que en el flujo bulk existente.
-  const ai = await generateMenuWithAI({
+  let ai = await generateMenuWithAI({
     year: req.year, week: req.week, parity, campId: base.id, diners: base.diners_default,
     arrival: base.reception_weekday_default, catalog, history,
   });
 
-  const results = camps.map((camp) => {
+  const validateAll = (items: MenuItem[]) => camps.map((camp) => {
     const shiftDays = weekdayShift(base.reception_weekday_default, camp.reception_weekday_default);
     const v = validateMenu({
-      items: ai.items, catalog, parity, arrival: base.reception_weekday_default,
+      items, catalog, parity, arrival: base.reception_weekday_default,
       year: req.year, week: req.week, campId: camp.id, diners: camp.diners_default, history,
     });
     return {
@@ -126,13 +126,25 @@ export async function actionGenerateBulk(req: { year: number; week: number; camp
       arrival: camp.reception_weekday_default, shiftDays, errors: v.metrics.errors,
       warnings: v.metrics.warnings, varietyScore: v.metrics.varietyScore,
     };
+
   });
 
-  const primaryValidation = validateMenu({
+  let results = validateAll(ai.items);
+  let primaryValidation = validateMenu({
     items: ai.items, catalog, parity, arrival: base.reception_weekday_default,
     year: req.year, week: req.week, campId: base.id, diners: base.diners_default, history,
   });
-  const totalErrors = results.reduce((sum, row) => sum + row.errors, 0);
+  let totalErrors = results.reduce((sum, row) => sum + row.errors, 0);
+  if (totalErrors > 0) {
+    const issueSets = camps.flatMap((camp) => validateMenu({ items: ai.items, catalog, parity, arrival: base.reception_weekday_default, year: req.year, week: req.week, campId: camp.id, diners: camp.diners_default, history }).issues.filter(i => i.level === "error").map(i => i.message));
+    const repairIssues = [...new Set(issueSets)];
+    console.log("[generate-ai-bulk] repair-start", { totalErrors, uniqueIssues: repairIssues.length });
+    ai = await generateMenuWithAI({ year:req.year, week:req.week, parity, campId:base.id, diners:base.diners_default, arrival:base.reception_weekday_default, catalog, history, currentItems:ai.items, repairIssues });
+    results = validateAll(ai.items);
+    primaryValidation = validateMenu({ items: ai.items, catalog, parity, arrival: base.reception_weekday_default, year: req.year, week: req.week, campId: base.id, diners: base.diners_default, history });
+    totalErrors = results.reduce((sum,row)=>sum+row.errors,0);
+    console.log("[generate-ai-bulk] repair-ready", { totalErrors });
+  }
   console.log("[generate-ai-bulk] ready", { camps: camps.length, totalErrors });
 
   return {
