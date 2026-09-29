@@ -1,6 +1,6 @@
 import type { Catalog, MainService, MenuItem, Parity, Weekday, WeeklyMenu } from "./types";
 import { beverageLabel } from "./rules";
-interface AiMenuInput { year:number; week:number; parity:Parity; campId:string; diners:number; arrival:Weekday; catalog:Catalog; history:WeeklyMenu[]; locked?:MenuItem[]; }
+interface AiMenuInput { year:number; week:number; parity:Parity; campId:string; diners:number; arrival:Weekday; catalog:Catalog; history:WeeklyMenu[]; locked?:MenuItem[]; currentItems?:MenuItem[]; repairIssues?:string[]; }
 interface AiChoice { weekday:number; service:MainService; component:"main"|"soup"; recipe_id:string; salad_recipe_id:string|null; }
 export async function generateMenuWithAI(input:AiMenuInput):Promise<{items:MenuItem[];seed:string}>{
  const apiKey=process.env.OPENAI_API_KEY;if(!apiKey) throw new Error("OPENAI_API_KEY no está configurada en el servidor.");
@@ -29,7 +29,7 @@ SOPAS: procura 1 pata/costilla, 2 hueso carnudo, 1 crema, 1 menestrón y 1 sin p
 PROTEINAS=${JSON.stringify(proteins)}
 CATALOGO=${JSON.stringify(recipes)}
 BLOQUEADOS=${JSON.stringify(locked)}
-RECIENTES=${JSON.stringify(recent)}`;
+RECIENTES=${JSON.stringify(recent)}\n${input.currentItems?.length?`MODO REPARACION: corrige el menú actual cambiando únicamente lo necesario para eliminar estos incumplimientos. Mantén los demás espacios siempre que sea posible. MENÚ_ACTUAL=${JSON.stringify(input.currentItems.map(i=>({weekday:i.weekday,service:i.service,component:i.component,recipe_id:i.recipe_id,salad_recipe_id:i.salad_recipe_id})))} INCUMPLIMIENTOS=${JSON.stringify((input.repairIssues??[]).slice(0,80))}`:""}`;
  const recipeIds=recipes.map(r=>r.id);
  const saladIds=input.catalog.recipes.filter(r=>r.active&&r.services.includes("salad")).map(r=>r.id);
  const schema={type:"object",additionalProperties:false,required:["items"],properties:{items:{type:"array",minItems:27,maxItems:27,items:{type:"object",additionalProperties:false,required:["weekday","service","component","recipe_id","salad_recipe_id"],properties:{weekday:{type:"integer",minimum:0,maximum:6},service:{type:"string",enum:["breakfast","lunch","dinner"]},component:{type:"string",enum:["main","soup"]},recipe_id:{type:"string",enum:recipeIds},salad_recipe_id:{anyOf:[{type:"string",enum:saladIds},{type:"null"}]}}}}}};
