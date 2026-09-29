@@ -96,7 +96,16 @@ export interface BulkCampResult {
   varietyScore: number;
 }
 
-function intersectRecipeIds(current: Set<string> | null, valid: Set<string>): Set<string> {\n  if (current === null) return new Set<string>(valid);\n  const out = new Set<string>();\n  current.forEach((id: string) => { if (valid.has(id)) out.add(id); });\n  return out;\n}\n\nexport async function actionGenerateBulk(req: { year: number; week: number; campIds: string[]; seed?: string }) {
+function intersectRecipeIds(current: Set<string> | null, valid: Set<string>): Set<string> {
+  if (current === null) return new Set<string>(valid);
+  const out = new Set<string>();
+  current.forEach((id: string) => {
+    if (valid.has(id)) out.add(id);
+  });
+  return out;
+}
+
+export async function actionGenerateBulk(req: { year: number; week: number; campIds: string[]; seed?: string }) {
   const repo = getRepo();
   const [catalog, history] = await Promise.all([
     repo.getCatalog(),
