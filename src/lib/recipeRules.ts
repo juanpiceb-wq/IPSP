@@ -1,5 +1,5 @@
-import type { Catalog, MenuItem, Recipe, Weekday } from "../types";
-import { cycleOrder } from "../rules";
+import type { Catalog, MenuItem, Recipe, Weekday } from "./types";
+import { cycleOrder } from "./rules";
 
 function normalize(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
