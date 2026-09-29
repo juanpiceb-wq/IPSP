@@ -96,7 +96,7 @@ export interface BulkCampResult {
   varietyScore: number;
 }
 
-export async function actionGenerateBulk(req: { year: number; week: number; campIds: string[]; seed?: string }) {
+function intersectRecipeIds(current: Set<string> | null, valid: Set<string>): Set<string> {\n  if (current === null) return new Set<string>(valid);\n  const out = new Set<string>();\n  current.forEach((id: string) => { if (valid.has(id)) out.add(id); });\n  return out;\n}\n\nexport async function actionGenerateBulk(req: { year: number; week: number; campIds: string[]; seed?: string }) {
   const repo = getRepo();
   const [catalog, history] = await Promise.all([
     repo.getCatalog(),
@@ -120,7 +120,7 @@ export async function actionGenerateBulk(req: { year: number; week: number; camp
         const day = (((d + shift) % 7) as Weekday);
         const ctx = buildContext(catalog, parity, camp.reception_weekday_default, histIndex);
         const valid = new Set<string>(catalog.recipes.filter(r=>r.active&&!r.services.includes("salad")&&!blockingReason(r,service,day,ctx)).map(r=>r.id));
-        ids = ids ? new Set<string>(Array.from(ids).filter((id: string)=>valid.has(id))) : valid;
+        ids = intersectRecipeIds(ids, valid);
       }
       safeSlots.push({weekday:d,service,component:"main",ids:[...(ids??new Set<string>())]});
     }
@@ -131,7 +131,7 @@ export async function actionGenerateBulk(req: { year: number; week: number; camp
         const day = (((d + shift) % 7) as Weekday);
         const ctx = buildContext(catalog, parity, camp.reception_weekday_default, histIndex);
         const valid = new Set<string>(catalog.recipes.filter(r=>r.active&&!blockingReason(r,"soup",day,ctx)).map(r=>r.id));
-        ids = ids ? new Set<string>(Array.from(ids).filter((id: string)=>valid.has(id))) : valid;
+        ids = intersectRecipeIds(ids, valid);
       }
       safeSlots.push({weekday:d,service:"lunch",component:"soup",ids:[...(ids??new Set<string>())]});
     }
