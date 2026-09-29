@@ -179,7 +179,8 @@ export async function actionValidateBulk(req: { year: number; week: number; camp
   const results: BulkCampResult[] = [];
   for (const camp of selectedCamps) {
     const shiftDays = weekdayShift(base.reception_weekday_default, camp.reception_weekday_default);
-    const v = validateMenu({ items: req.items, catalog, parity, arrival: base.reception_weekday_default, year: req.year, week: req.week, campId: camp.id, diners: camp.diners_default, history });
+    const shiftedItems = shiftMenuItems(req.items, shiftDays);
+    const v = validateMenu({ items: shiftedItems, catalog, parity, arrival: camp.reception_weekday_default, year: req.year, week: req.week, campId: camp.id, diners: camp.diners_default, history });
     results.push({ campId: camp.id, campName: camp.name, diners: camp.diners_default, arrival: camp.reception_weekday_default, shiftDays, errors: v.metrics.errors, warnings: v.metrics.warnings, varietyScore: v.metrics.varietyScore });
   }
   const primary = results[0];
