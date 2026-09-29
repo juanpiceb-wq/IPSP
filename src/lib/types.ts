@@ -81,6 +81,10 @@ export interface Recipe {
   active: boolean;
   source: string;
   notes?: string | null;
+  /** Ingredientes principales revisados en el maestro; no implican por sí solos un tope duro semanal. */
+  main_ingredients?: string[];
+  /** Compatibilidad de ensalada definida por plato. */
+  salad_policy?: string | null;
 
   /** Campos operativos del maestro v2. Opcionales para mantener compatibilidad con ensaladas históricas. */
   base_ingredient?: string | null;
