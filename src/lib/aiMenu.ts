@@ -33,7 +33,7 @@ RECIENTES=${JSON.stringify(recent)}`;
  const recipeIds=recipes.map(r=>r.id);
  const saladIds=input.catalog.recipes.filter(r=>r.active&&r.services.includes("salad")).map(r=>r.id);
  const schema={type:"object",additionalProperties:false,required:["items"],properties:{items:{type:"array",minItems:27,maxItems:27,items:{type:"object",additionalProperties:false,required:["weekday","service","component","recipe_id","salad_recipe_id"],properties:{weekday:{type:"integer",minimum:0,maximum:6},service:{type:"string",enum:["breakfast","lunch","dinner"]},component:{type:"string",enum:["main","soup"]},recipe_id:{type:"string",enum:recipeIds},salad_recipe_id:{anyOf:[{type:"string",enum:saladIds},{type:"null"}]}}}}}};
- const controller=new AbortController();const timeoutMs=20000;const timer=setTimeout(()=>controller.abort(),timeoutMs);
+ const controller=new AbortController();const timeoutMs=60000;const timer=setTimeout(()=>controller.abort(),timeoutMs);
  console.log("[openai-menu] request-start",{model:process.env.OPENAI_MENU_MODEL||"gpt-5.6-luna",recipes:recipes.length,history:recent.length,timeoutMs});
  try{
   const res=await fetch("https://api.openai.com/v1/responses",{method:"POST",headers:{Authorization:`Bearer ${apiKey}`,"Content-Type":"application/json"},signal:controller.signal,body:JSON.stringify({model:process.env.OPENAI_MENU_MODEL||"gpt-5.6-luna",store:false,reasoning:{effort:"medium"},input:[{role:"user",content:[{type:"input_text",text:prompt}]}],text:{format:{type:"json_schema",name:"ipsp_weekly_menu",strict:true,schema}}})});
