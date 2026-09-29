@@ -1,6 +1,7 @@
 import type { Catalog, MainService, MenuItem, Parity, Weekday, WeeklyMenu } from "./types";
 import { beverageLabel } from "./rules";
 import { blockingReason, buildContext, buildHistoryIndex } from "./engine/context";
+import { mainAllowsSalad, saladAllowedForMain } from "./salads";
 interface AiMenuInput { year:number; week:number; parity:Parity; campId:string; diners:number; arrival:Weekday; catalog:Catalog; history:WeeklyMenu[]; locked?:MenuItem[]; currentItems?:MenuItem[]; repairIssues?:string[]; }
 interface AiChoice { weekday:number; service:MainService; component:"main"|"soup"; recipe_id:string; salad_recipe_id:string|null; }
 export async function generateMenuWithAI(input:AiMenuInput):Promise<{items:MenuItem[];seed:string}>{
@@ -49,7 +50,10 @@ RECIENTES=${JSON.stringify(recent)}\n${input.currentItems?.length?`MODO REPARACI
   const data:any=await res.json();const outputText=data.output?.flatMap((o:any)=>o.content??[]).find((x:any)=>x.type==="output_text")?.text;
   if(!outputText) throw new Error("OpenAI no devolvió un menú estructurado.");
   const parsed=JSON.parse(outputText) as {items:AiChoice[]};const recipeById=new Map(input.catalog.recipes.map(r=>[r.id,r]));
-  const items:MenuItem[]=parsed.items.map(x=>{const r=recipeById.get(x.recipe_id);if(!r)throw new Error(`recipe_id inexistente: ${x.recipe_id}`);if(x.salad_recipe_id&&!recipeById.has(x.salad_recipe_id))throw new Error(`salad_recipe_id inexistente: ${x.salad_recipe_id}`);return{weekday:x.weekday as Weekday,service:x.service,component:x.component,recipe_id:x.recipe_id,protein_id:r.primary_protein_id,salad_recipe_id:x.component==="main"?x.salad_recipe_id:null,beverage:x.component==="main"?beverageLabel(x.service,input.parity):null,locked:false,reasons:["Propuesto por IA y verificado por el validador IPSP."],execution_status:"pending",replacement_name:null};});
+  const items:MenuItem[]=parsed.items.map(x=>{const r=recipeById.get(x.recipe_id);if(!r)throw new Error(`recipe_id inexistente: ${x.recipe_id}`);if(x.salad_recipe_id&&!recipeById.has(x.salad_recipe_id))throw new Error(`salad_recipe_id inexistente: ${x.salad_recipe_id}`);let saladId=x.component==="main"?x.salad_recipe_id:null;if(saladId&&(x.service==="lunch"||x.service==="dinner")){const salad=recipeById.get(saladId);if(!mainAllowsSalad(r)||!salad||!saladAllowedForMain(r,salad))saladId=null;}else saladId=null;return{weekday:x.weekday as Weekday,service:x.service,component:x.component,recipe_id:x.recipe_id,protein_id:r.primary_protein_id,salad_recipe_id:saladId,beverage:x.component==="main"?beverageLabel(x.service,input.parity):null,locked:false,reasons:["Propuesto por IA y verificado por el validador IPSP."],execution_status:"pending",replacement_name:null};});
+  const salads=input.catalog.recipes.filter(r=>r.active&&r.services.includes("salad"));
+  let saladCount=items.filter(i=>(i.service==="lunch"||i.service==="dinner")&&!!i.salad_recipe_id).length;
+  for(const item of items){if(saladCount>=5)break;if(item.component!=="main"||(item.service!=="lunch"&&item.service!=="dinner")||item.salad_recipe_id||!item.recipe_id)continue;const main=recipeById.get(item.recipe_id);if(!main||!mainAllowsSalad(main))continue;const salad=salads.find(s=>saladAllowedForMain(main,s));if(salad){item.salad_recipe_id=salad.id;saladCount++;}}
   return{items,seed:`ai-${Date.now()}`};
  }catch(err:any){
   if(err?.name==="AbortError"){console.error("[openai-menu] timeout",{timeoutMs});throw new Error(`OpenAI no respondió en ${timeoutMs/1000} segundos. Intente nuevamente.`);}
