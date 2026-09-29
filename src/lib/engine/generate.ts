@@ -3,7 +3,7 @@ import { RULES, SUNDAY_PREFERRED_PROTEINS, beverageLabel, cycleOrder } from "../
 import { addConsumption, canConsume } from "../supply";
 import { SALAD_STOCK_ID, finalSaladCatalog, mainAllowsSalad, saladAllowedForMain, saladIngredientCapReason, saladPreferenceScore } from "../salads";
 import { weeklyIngredientCapReason } from "./ingredientFrequency";
-import { hasChickenOnFirstDay, soupCompositionSatisfied, soupNeedScore, violatesAdjacentSauce } from "./recipeRules";
+import { hasChickenOnFirstDay, soupCompositionSatisfied, soupNeedScore, violatesAdjacentSauce } from "../recipeRules";
 import {
   EngineContext,
   MAIN_SERVICE_ORDER,
