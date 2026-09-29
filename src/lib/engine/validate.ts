@@ -302,10 +302,10 @@ export function validateMenu(input: ValidateInput): ValidationResult {
   for (const row of inventorySummary(ledger, input.diners)) {
     if (isHardStockKey(row.key) && row.used > row.cap + 1e-9) {
       stockErrors++;
-      issues.push({ level: "error", rule: "stock", message: `${row.label}: consumo ${round(row.used)} ${row.unit} > disponible ${round(row.cap)} ${row.unit}.` });
+      issues.push({ level: "warn", rule: "stock", message: `${row.label}: consumo ${round(row.used)} ${row.unit} > disponible ${round(row.cap)} ${row.unit}.` });
     }
   }
-  if (!stockErrors) issues.push({ level: "ok", rule: "stock", message: "El menú no excede los stocks semanales cuantificables del cuadro de víveres." });
+  if (!stockErrors) issues.push({ level: "ok", rule: "stock", message: "Consumos estimados dentro de las referencias semanales del cuadro de víveres." });
 
   const menuComplete = missingMainSlots.length === 0 && missingSoups.length === 0 && !sundaySoup;
   const variety = menuComplete ? varietyScore(items, ctx.history, ctx.recipesById) : 0;
@@ -377,7 +377,7 @@ export function menuStockReason(items: MenuItem[], candidate: { recipe_id: strin
   }
   for (const c of recipeConsumptions(recipe, diners)) {
     const cap = availableQuantity(c.key, diners);
-    if (isHardStockKey(c.key) && cap != null && (ledger.get(c.key) ?? 0) + c.quantity > cap + 1e-9) return `${c.label} excedería el stock semanal.`;
+    // El consumo es informativo: nunca bloquea una preparación.\n    if (isHardStockKey(c.key) && cap != null && (ledger.get(c.key) ?? 0) + c.quantity > cap + 1e-9) continue;
   }
   return null;
 }
