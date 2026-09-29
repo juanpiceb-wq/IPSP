@@ -1,8 +1,9 @@
 ﻿import type { Catalog, MainService, MenuItem, Parity, Recipe, Weekday, WeeklyMenu } from "../types";
 import { RULES, SUNDAY_PREFERRED_PROTEINS, beverageLabel, cycleOrder } from "../rules";
 import { addConsumption, canConsume } from "../supply";
-import { SALAD_STOCK_ID, finalSaladCatalog, saladIngredientCapReason } from "../salads";
+import { SALAD_STOCK_ID, finalSaladCatalog, mainAllowsSalad, saladAllowedForMain, saladIngredientCapReason, saladPreferenceScore } from "../salads";
 import { weeklyIngredientCapReason } from "./ingredientFrequency";
+import { hasChickenOnFirstDay, soupCompositionSatisfied, soupNeedScore, violatesAdjacentSauce } from "./recipeRules";
 import {
   EngineContext,
   MAIN_SERVICE_ORDER,
@@ -189,7 +190,11 @@ function searchSlots(
     cfg.bestDepth = index;
     cfg.bestState = cloneState(state);
   }
-  if (index >= slots.length) return state;
+  if (index >= slots.length) {
+    if (cfg.component === "main" && !hasChickenOnFirstDay(state.items, cfg.input.arrival)) return null;
+    if (cfg.component === "soup" && !soupCompositionSatisfied(state.items, cfg.input.catalog)) return null;
+    return state;
+  }
   if (++cfg.nodeBudget.used > cfg.nodeBudget.max) return null;
 
   const slot = slots[index];
@@ -319,6 +324,7 @@ function candidateList(a: PickArgs): Candidate[] {
       const difficulty = recipe.difficulty ?? 1;
       if (dayDifficulty(a.items, a.weekday, a.ctx) + difficulty > RULES.MAX_DAILY_DIFFICULTY) continue;
       if (hasAdjacentBase(a.items, a.weekday, recipe.base_ingredient, a.ctx, a.arrival)) continue;
+      if (violatesAdjacentSauce(a.items, a.weekday, recipe, a.catalog, a.arrival)) continue;
     }
 
     const ingredientCapReason = weeklyIngredientCapReason(a.items, recipe, a.weekday, a.service, a.catalog);
@@ -329,6 +335,11 @@ function candidateList(a: PickArgs): Candidate[] {
 
     const reasons: string[] = [];
     let score = 100;
+    if (a.component === "main" && protein?.id === "pollo" && a.weekday === cycleOrder(a.arrival)[0]) {
+      score += 500;
+      reasons.push("Pollo priorizado obligatoriamente en el primer día posterior a la recepción.");
+    }
+    if (a.component === "soup") score += soupNeedScore(a.items, recipe, a.catalog);
     const rAgo = a.ctx.history.recipeAgo.get(recipe.id);
     if (rAgo !== undefined) {
       const w = recencyWeight(rAgo);
@@ -489,46 +500,41 @@ function assignSalads(items: MenuItem[], input: GenerateInput, ctx: EngineContex
   const earlyDays = new Set(order.slice(0, 5));
   const lateDays = order.slice(5, 7);
   const targets = items.filter((i) => i.component === "main" && !!i.recipe_id && (i.service === "lunch" || i.service === "dinner"));
-
-  // Las ensaladas no forman parte del bloqueo del plato fuerte. Al regenerar,
-  // se respetan únicamente las ensaladas de celdas bloqueadas.
   for (const item of targets) if (!item.locked) item.salad_recipe_id = null;
 
-  // Días 6 y 7 del ciclo: exactamente una "Ensalada según stock" por día.
+  const mainRecipe = (item: MenuItem) => item.recipe_id ? ctx.recipesById.get(item.recipe_id) ?? null : null;
+  const eligibleTargets = targets.filter((item) => {
+    const main = mainRecipe(item);
+    return !!main && mainAllowsSalad(main);
+  });
+
   for (const day of lateDays) {
-    const dayItems = targets.filter((i) => i.weekday === day);
+    const dayItems = eligibleTargets.filter((i) => i.weekday === day);
     if (dayItems.some((i) => i.locked && i.salad_recipe_id === SALAD_STOCK_ID)) continue;
-    const free = dayItems
-      .filter((i) => !i.locked)
-      .map((item) => ({ item, difficulty: item.recipe_id ? (ctx.recipesById.get(item.recipe_id)?.difficulty ?? 1) : 1, n: rng() }))
-      .sort((a, b) => a.difficulty - b.difficulty || a.n - b.n);
+    const free = dayItems.filter((i) => !i.locked)
+      .map((item) => ({ item, difficulty: mainRecipe(item)?.difficulty ?? 1, n: rng() }))
+      .sort((a,b) => a.difficulty-b.difficulty || a.n-b.n);
     if (free[0]) free[0].item.salad_recipe_id = SALAD_STOCK_ID;
   }
 
-  // Primeros 5 días: ocho ensaladas específicas entre diez servicios.
-  const earlyTargets = targets.filter((i) => earlyDays.has(i.weekday));
+  const earlyTargets = eligibleTargets.filter((i) => earlyDays.has(i.weekday));
   const lockedSpecific = earlyTargets.filter((i) => i.locked && i.salad_recipe_id && i.salad_recipe_id !== SALAD_STOCK_ID).length;
   const needed = Math.max(0, 8 - lockedSpecific);
-  const selectedSlots = earlyTargets
-    .filter((i) => !i.locked)
-    .map((item) => ({ item, difficulty: item.recipe_id ? (ctx.recipesById.get(item.recipe_id)?.difficulty ?? 1) : 1, n: rng() }))
-    .sort((a, b) => a.difficulty - b.difficulty || a.n - b.n)
-    .slice(0, needed)
-    .map((x) => x.item);
+  const selectedSlots = earlyTargets.filter((i)=>!i.locked)
+    .map((item)=>({item,difficulty:mainRecipe(item)?.difficulty??1,n:rng()}))
+    .sort((a,b)=>a.difficulty-b.difficulty||a.n-b.n).slice(0,needed).map((x)=>x.item);
 
-  const saladCatalog = finalSaladCatalog(input.catalog).filter((r) => r.id !== SALAD_STOCK_ID);
+  const saladCatalog = finalSaladCatalog(input.catalog).filter((r)=>r.id!==SALAD_STOCK_ID);
   for (const item of selectedSlots) {
-    const options = saladCatalog
-      .filter((r) => !usedRecipes.has(r.id))
-      .filter((r) => isEligible(r, "salad", item.weekday, ctx))
-      .filter((r) => !saladIngredientCapReason(items, r.id))
-      .map((r) => ({ r, s: 100 - 60 * recencyWeight(ctx.history.recipeAgo.get(r.id)) + rng() * 20 }))
-      .sort((a, b) => b.s - a.s);
-    const pick = options[0]?.r;
-    if (pick) {
-      item.salad_recipe_id = pick.id;
-      usedRecipes.add(pick.id);
-    }
+    const main=mainRecipe(item); if(!main) continue;
+    const options=saladCatalog
+      .filter((r)=>isEligible(r,"salad",item.weekday,ctx))
+      .filter((r)=>saladAllowedForMain(main,r))
+      .filter((r)=>!saladIngredientCapReason(items,r.id))
+      .map((r)=>({r,s:100+saladPreferenceScore(r)-40*recencyWeight(ctx.history.recipeAgo.get(r.id))+rng()*20}))
+      .sort((a,b)=>b.s-a.s);
+    const pick=options[0]?.r;
+    if(pick) item.salad_recipe_id=pick.id;
   }
 }
 
@@ -594,8 +600,10 @@ function generationQuality(out: GenerateOutput, input: GenerateInput) {
 function isCompleteGeneration(out: GenerateOutput, input: GenerateInput) {
   const mains = out.items.filter((i) => i.component === "main" && i.recipe_id).length;
   const soups = out.items.filter((i) => i.component === "soup" && i.recipe_id).length;
-  const salads = out.items.filter((i) => i.component === "main" && i.recipe_id && (i.service === "lunch" || i.service === "dinner")).length;
+  const salads = out.items.filter((i) => i.component === "main" && i.recipe_id && i.salad_recipe_id && (i.service === "lunch" || i.service === "dinner")).length;
   if (mains !== RULES.MAIN_SLOTS || soups !== RULES.SOUP_SLOTS || salads < RULES.SALAD_MIN) return false;
+  if (!hasChickenOnFirstDay(out.items, input.arrival)) return false;
+  if (!soupCompositionSatisfied(out.items, input.catalog)) return false;
   const uses = new Map<string, number>();
   for (const it of out.items) if (it.protein_id) uses.set(it.protein_id, (uses.get(it.protein_id) ?? 0) + 1);
   for (const p of input.catalog.proteins) {
