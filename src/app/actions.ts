@@ -5,6 +5,7 @@ import { getRepo, newId, slugify } from "@/lib/db";
 import { generateMenu } from "@/lib/engine/generate";
 import { generateMenuWithAI } from "@/lib/aiMenu";
 import { validateMenu } from "@/lib/engine/validate";
+import { blockingReason, buildContext, buildHistoryIndex } from "@/lib/engine/context";
 import { cycleDates } from "@/lib/dates";
 import { parityOfWeek, RULES } from "@/lib/rules";
 import { assertCanManageExecution, assertGeneralAdmin } from "@/lib/access";
@@ -108,11 +109,36 @@ export async function actionGenerateBulk(req: { year: number; week: number; camp
   const parity = parityOfWeek(req.week);
   console.log("[generate-ai-bulk] start", { camps: camps.length, year: req.year, week: req.week });
 
-  // La IA construye una sola secuencia base. Los demás campamentos reciben esa misma
-  // secuencia desplazada según su día de recepción, igual que en el flujo bulk existente.
+  // El menú común solo puede usar recetas válidas simultáneamente para todos los campamentos.
+  const histIndex = buildHistoryIndex(history, req.year, req.week, base.id, catalog);
+  const safeSlots: Array<{weekday:number;service:string;component:string;ids:string[]}> = [];
+  for (let d=0; d<7; d++) {
+    for (const service of ["breakfast","lunch","dinner"] as const) {
+      let ids: Set<string>|null = null;
+      for (const camp of camps) {
+        const shift = weekdayShift(base.reception_weekday_default, camp.reception_weekday_default);
+        const day = (((d + shift) % 7) as Weekday);
+        const ctx = buildContext(catalog, parity, camp.reception_weekday_default, histIndex);
+        const valid = new Set(catalog.recipes.filter(r=>r.active&&!r.services.includes("salad")&&!blockingReason(r,service,day,ctx)).map(r=>r.id));
+        ids = ids ? new Set([...ids].filter(id=>valid.has(id))) : valid;
+      }
+      safeSlots.push({weekday:d,service,component:"main",ids:[...(ids??new Set<string>())]});
+    }
+    if (d<6) {
+      let ids: Set<string>|null = null;
+      for (const camp of camps) {
+        const shift = weekdayShift(base.reception_weekday_default, camp.reception_weekday_default);
+        const day = (((d + shift) % 7) as Weekday);
+        const ctx = buildContext(catalog, parity, camp.reception_weekday_default, histIndex);
+        const valid = new Set(catalog.recipes.filter(r=>r.active&&!blockingReason(r,"soup",day,ctx)).map(r=>r.id));
+        ids = ids ? new Set([...ids].filter(id=>valid.has(id))) : valid;
+      }
+      safeSlots.push({weekday:d,service:"lunch",component:"soup",ids:[...(ids??new Set<string>())]});
+    }
+  }
   let ai = await generateMenuWithAI({
     year: req.year, week: req.week, parity, campId: base.id, diners: base.diners_default,
-    arrival: base.reception_weekday_default, catalog, history,
+    arrival: base.reception_weekday_default, catalog, history, eligibleBySlotOverride: safeSlots,
   });
 
   const validateAll = (items: MenuItem[]) => camps.map((camp) => {
@@ -141,7 +167,7 @@ export async function actionGenerateBulk(req: { year: number; week: number; camp
     const repairIssues = [...new Set(issueSets)];
     console.log("[generate-ai-bulk] repair-start", { totalErrors, uniqueIssues: repairIssues.length });
     try {
-      const repaired = await generateMenuWithAI({ year:req.year, week:req.week, parity, campId:base.id, diners:base.diners_default, arrival:base.reception_weekday_default, catalog, history, currentItems:ai.items, repairIssues });
+      const repaired = await generateMenuWithAI({ year:req.year, week:req.week, parity, campId:base.id, diners:base.diners_default, arrival:base.reception_weekday_default, catalog, history, currentItems:ai.items, repairIssues, eligibleBySlotOverride:safeSlots });
       const repairedResults = validateAll(repaired.items);
       const repairedErrors = repairedResults.reduce((sum,row)=>sum+row.errors,0);
       if (repairedErrors < totalErrors) {
