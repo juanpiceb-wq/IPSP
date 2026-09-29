@@ -1,5 +1,6 @@
 import type { Catalog, MainService, MenuItem, Parity, Weekday, WeeklyMenu } from "./types";
 import { beverageLabel } from "./rules";
+import { blockingReason, buildContext, buildHistoryIndex } from "./engine/context";
 interface AiMenuInput { year:number; week:number; parity:Parity; campId:string; diners:number; arrival:Weekday; catalog:Catalog; history:WeeklyMenu[]; locked?:MenuItem[]; currentItems?:MenuItem[]; repairIssues?:string[]; }
 interface AiChoice { weekday:number; service:MainService; component:"main"|"soup"; recipe_id:string; salad_recipe_id:string|null; }
 export async function generateMenuWithAI(input:AiMenuInput):Promise<{items:MenuItem[];seed:string}>{
@@ -7,6 +8,10 @@ export async function generateMenuWithAI(input:AiMenuInput):Promise<{items:MenuI
  const recipes=input.catalog.recipes.filter(r=>r.active).map(r=>({id:r.id,name:r.name,protein:r.primary_protein_id,services:r.services,base:r.base_ingredient??null,difficulty:r.difficulty??1,sunday_roast:!!r.sunday_roast,fixed_weekday:r.fixed_weekday??null,fixed_service:r.fixed_service??null,only_weekday:r.only_weekday??null,products:r.restrictive_product_ids}));
  const proteins=input.catalog.proteins.filter(p=>p.active).map(p=>({id:p.id,name:p.name,origin:p.origin,max:p.target_frequency,breakfast_only:p.breakfast_only,soup_only:p.soup_only,parity:p.parity}));
  const recent=input.history.slice(0,8).map(m=>m.items.filter(i=>i.recipe_id).map(i=>i.recipe_id));
+ const hist=buildHistoryIndex(input.history,input.year,input.week,input.campId,input.catalog);
+ const ctx=buildContext(input.catalog,input.parity,input.arrival,hist);
+ const eligibleBySlot:Array<{weekday:number;service:string;component:string;ids:string[]}>=[];
+ for(let d=0;d<7;d++){for(const s of ["breakfast","lunch","dinner"] as MainService[]){eligibleBySlot.push({weekday:d,service:s,component:"main",ids:input.catalog.recipes.filter(r=>r.active&&!r.services.includes("salad")&&!blockingReason(r,s,d as Weekday,ctx)).map(r=>r.id)});}if(d<6)eligibleBySlot.push({weekday:d,service:"lunch",component:"soup",ids:input.catalog.recipes.filter(r=>r.active&&!blockingReason(r,"soup",d as Weekday,ctx)).map(r=>r.id)});}
  const locked=(input.locked??[]).filter(i=>i.locked&&i.recipe_id).map(i=>({weekday:i.weekday,service:i.service,component:i.component,recipe_id:i.recipe_id,salad_recipe_id:i.salad_recipe_id}));
  const prompt=`Planifica el menú semanal IPSP usando EXCLUSIVAMENTE IDs del catálogo.
 Semana ${input.week}/${input.year}, paridad ${input.parity}, recepción weekday=${input.arrival}, comensales=${input.diners}.
@@ -28,6 +33,8 @@ REGLAS DURAS:
 SOPAS: procura 1 pata/costilla, 2 hueso carnudo, 1 crema, 1 menestrón y 1 sin proteína.
 PROTEINAS=${JSON.stringify(proteins)}
 CATALOGO=${JSON.stringify(recipes)}
+OPCIONES_VALIDAS_POR_ESPACIO=${JSON.stringify(eligibleBySlot)}
+Para cada espacio DEBES elegir recipe_id únicamente de ids de OPCIONES_VALIDAS_POR_ESPACIO para ese weekday/service/component.
 BLOQUEADOS=${JSON.stringify(locked)}
 RECIENTES=${JSON.stringify(recent)}\n${input.currentItems?.length?`MODO REPARACION: corrige el menú actual cambiando únicamente lo necesario para eliminar estos incumplimientos. Mantén los demás espacios siempre que sea posible. MENÚ_ACTUAL=${JSON.stringify(input.currentItems.map(i=>({weekday:i.weekday,service:i.service,component:i.component,recipe_id:i.recipe_id,salad_recipe_id:i.salad_recipe_id})))} INCUMPLIMIENTOS=${JSON.stringify((input.repairIssues??[]).slice(0,80))}`:""}`;
  const recipeIds=recipes.map(r=>r.id);
