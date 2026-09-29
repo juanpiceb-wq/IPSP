@@ -1,5 +1,22 @@
 import type { Recipe, SupplyLimit } from "./types";
 
+const HARD_BASE_STOCK_KEYS = new Set([
+  "base:platano",
+  "base:papa",
+  "base:yuca",
+  "base:pasta",
+  "base:lenteja",
+  "base:garbanzo",
+  "base:mote",
+  "base:frejol",
+  "base:choclo",
+  "base:harina",
+]);
+
+export function isHardStockKey(key: string) {
+  return key.startsWith("protein:") || key.startsWith("meal:") || HARD_BASE_STOCK_KEYS.has(key);
+}
+
 /**
  * Capacidad semanal normalizada por persona, tomada del Cuadro de Víveres IPSP.
  * Solo aparecen insumos cuya unidad puede compararse de forma segura con el maestro.
@@ -123,6 +140,7 @@ export function canConsume(
   diners: number
 ): string | null {
   for (const c of recipeConsumptions(recipe, diners)) {
+    if (!isHardStockKey(c.key)) continue;
     const cap = availableQuantity(c.key, diners);
     if (cap == null) continue;
     const used = ledger.get(c.key) ?? 0;
