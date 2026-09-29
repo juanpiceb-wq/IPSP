@@ -63,6 +63,8 @@ export class SupabaseRepo implements Repo {
         active: r.active,
         source: r.source,
         notes: r.notes,
+        main_ingredients: Array.isArray(r.main_ingredients) ? r.main_ingredients.map(String) : [],
+        salad_policy: r.salad_policy ?? null,
         services: servicesByRecipe.get(r.id) ?? [],
         restrictive_product_ids: restrByRecipe.get(r.id) ?? [],
         base_ingredient: r.base_ingredient ?? null,
