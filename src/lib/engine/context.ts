@@ -177,6 +177,10 @@ export function blockingReason(
   for (const pid of effectiveRestrictiveProductIds(recipe)) {
     const prod = ctx.productsById.get(pid);
     if (!prod || !prod.active) continue;
+    // Solo los productos estructurales bloquean una preparación por paridad/llegada.
+    // Vegetales, condimentos y elementos de refrito son una preferencia operativa:
+    // si faltan, cocina puede ajustar el plato sin volver inviable toda la semana.
+    if (!isHardRestrictiveProduct(pid)) continue;
     const hardParity = HARD_PRODUCT_PARITY[pid] ?? prod.parity;
     if (hardParity !== "todas" && hardParity !== ctx.parity)
       return `${prod.name} no está disponible en semana ${ctx.parity}.`;
@@ -213,6 +217,15 @@ export function isEligible(recipe: Recipe, service: Service, weekday: Weekday, c
  * `restrictive_product_ids`, pero esta capa evita que recetas antiguas o creadas
  * antes de una migración salten las reglas de paridad.
  */
+const HARD_RESTRICTIVE_PRODUCTS = new Set([
+  "costilla-res-prod", "pata-res-prod", "atun-real", "sardina-prod",
+  "tallarin", "fideos", "garbanzo", "mote", "quaker"
+]);
+
+function isHardRestrictiveProduct(id: string) {
+  return HARD_RESTRICTIVE_PRODUCTS.has(id);
+}
+
 const HARD_PRODUCT_PARITY: Record<string, "todas" | Parity> = {
   "aji": "par",
   "canela": "par",
