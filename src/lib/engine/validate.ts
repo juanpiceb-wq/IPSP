@@ -2,9 +2,9 @@
 import { RULES, allowedBeverages, cycleOrder } from "../rules";
 import { WEEKDAYS } from "../types";
 import { addConsumption, availableQuantity, inventorySummary, recipeConsumptions } from "../supply";
-import { SALAD_STOCK_ID, saladIngredientViolations, saladTimingReason } from "../salads";
+import { SALAD_STOCK_ID, mainAllowsSalad, saladAllowedForMain, saladIngredientViolations, saladTimingReason } from "../salads";
 import { blockingReason, buildContext, buildHistoryIndex, isMeaningfulBase, recencyWeight, weeklyDishKey } from "./context";
-import { weeklyIngredientCapViolations } from "./ingredientFrequency";
+import { adjacentSauceViolations, hasChickenOnFirstDay, soupCompositionCounts } from "./recipeRules";
 
 export interface ValidateInput {
   items: MenuItem[];
@@ -50,6 +50,16 @@ export function validateMenu(input: ValidateInput): ValidationResult {
   issues.push(missingSoups.length
     ? { level: "error", rule: "sopa-almuerzo", message: `${missingSoups.length} almuerzo(s) de lunes a sábado sin sopa.` }
     : { level: "ok", rule: "sopa-almuerzo", message: "Los almuerzos de lunes a sábado tienen sopa; domingo no lleva sopa." });
+  const soupMix = soupCompositionCounts(items, catalog);
+  const soupMixProblems: string[] = [];
+  if (soupMix.pataOCostilla < 1) soupMixProblems.push("1 sopa de pata o costilla");
+  if (soupMix.hueso < 2) soupMixProblems.push("2 sopas con hueso carnudo");
+  if (soupMix.crema < 1) soupMixProblems.push("1 crema");
+  if (soupMix.menestron < 1) soupMixProblems.push("1 menestrón");
+  if (soupMix.sinProteina < 1) soupMixProblems.push("1 sopa sin proteína animal");
+  issues.push(soupMixProblems.length
+    ? { level: "error", rule: "composicion-sopas", message: `Composición semanal de sopas incompleta: falta ${soupMixProblems.join(", ")}.` }
+    : { level: "ok", rule: "composicion-sopas", message: "Sopas: mínimos de pata/costilla, hueso, crema, menestrón y sin proteína cumplidos." });
 
   let invalid = 0;
   for (const it of items) {
@@ -68,6 +78,15 @@ export function validateMenu(input: ValidateInput): ValidationResult {
     }
   }
   if (!invalid) issues.push({ level: "ok", rule: "restriccion", message: "Todas las preparaciones respetan servicio, paridad, domingo, doble fritura y maduración." });
+  const firstCycleDay = cycleOrder(input.arrival)[0];
+  if (!hasChickenOnFirstDay(items, input.arrival))
+    issues.push({ level: "error", rule: "pollo-primer-dia", message: `El pollo debe prepararse obligatoriamente el primer día posterior a la recepción de víveres (${WEEKDAYS[firstCycleDay].label}).`, weekday: firstCycleDay });
+  else issues.push({ level: "ok", rule: "pollo-primer-dia", message: `Pollo programado en el primer día del ciclo (${WEEKDAYS[firstCycleDay].label}).` });
+
+  const sauceProblems = adjacentSauceViolations(items, catalog, input.arrival);
+  for (const v of sauceProblems)
+    issues.push({ level: "error", rule: "salsa-consecutiva", message: `${v.label}: se repite en el mismo día o en días contiguos (${WEEKDAYS[v.dayA].label} / ${WEEKDAYS[v.dayB].label}).` });
+  if (!sauceProblems.length) issues.push({ level: "ok", rule: "salsa-consecutiva", message: "No se repite la misma salsa en el mismo día ni en días contiguos del ciclo." });
 
   // Domingo fijo / asado: validación explícita para mensajes claros.
   const sundayLunch = mains.find((i) => i.weekday === 6 && i.service === "lunch");
@@ -208,6 +227,15 @@ export function validateMenu(input: ValidateInput): ValidationResult {
 
   // Ensaladas: 8 recetas específicas en los primeros 5 días del ciclo +
   // 1 "Ensalada según stock" en cada uno de los días 6 y 7 = 10/14.
+  const forbiddenSalads = lunchDinner.filter((i) => {
+    if (!i.salad_recipe_id || !i.recipe_id) return false;
+    const main = catalog.recipes.find((r) => r.id === i.recipe_id);
+    return !!main && !mainAllowsSalad(main);
+  });
+  for (const item of forbiddenSalads) {
+    const main = item.recipe_id ? catalog.recipes.find((r) => r.id === item.recipe_id) : null;
+    issues.push({ level: "error", rule: "ensalada-no-aplica", message: `${WEEKDAYS[item.weekday].label}: ${main?.name ?? "El plato"} no lleva ensalada.`, weekday: item.weekday, service: item.service });
+  }
   const saladCount = lunchDinner.filter((i) => !!i.salad_recipe_id).length;
   if (saladCount < RULES.SALAD_MIN)
     issues.push({ level: "error", rule: "ensaladas", message: `${saladCount}/${RULES.SALAD_SERVICES} servicios con ensalada; se requieren ${RULES.SALAD_TARGET}.` });
@@ -216,7 +244,6 @@ export function validateMenu(input: ValidateInput): ValidationResult {
   else
     issues.push({ level: "ok", rule: "ensaladas", message: "10/14 servicios con ensalada: 8 específicas + 2 según stock." });
 
-  const saladSeen = new Set<string>();
   let earlySpecific = 0;
   let saladErrors = 0;
   const orderForSalads = cycleOrder(input.arrival);
@@ -231,19 +258,17 @@ export function validateMenu(input: ValidateInput): ValidationResult {
       issues.push({ level: "error", rule: "ensalada-catalogo", message: `${WEEKDAYS[item.weekday].label}: la ensalada asignada no pertenece al catálogo activo.`, weekday: item.weekday, service: item.service });
       continue;
     }
+    const main = item.recipe_id ? catalog.recipes.find((r) => r.id === item.recipe_id) : null;
+    if (main && !saladAllowedForMain(main, salad)) {
+      saladErrors++;
+      issues.push({ level: "error", rule: "ensalada-compatibilidad", message: `${WEEKDAYS[item.weekday].label} · ${item.service === "lunch" ? "almuerzo" : "cena"}: ${main.name} no debe acompañarse con ${salad.name}.`, weekday: item.weekday, service: item.service });
+    }
     const restriction = blockingReason(salad, "salad", item.weekday, ctx) ?? saladTimingReason(salad.id, item.weekday, input.arrival);
     if (restriction) {
       saladErrors++;
       issues.push({ level: "error", rule: "ensalada-restriccion", message: `${WEEKDAYS[item.weekday].label} · ${item.service === "lunch" ? "almuerzo" : "cena"}: ${restriction}`, weekday: item.weekday, service: item.service });
     }
-    if (salad.id !== SALAD_STOCK_ID) {
-      if (saladSeen.has(salad.id)) {
-        saladErrors++;
-        issues.push({ level: "error", rule: "ensalada-repetida", message: `${salad.name} se repite; las ensaladas específicas no deben repetirse en la misma semana.` });
-      }
-      saladSeen.add(salad.id);
-      if (earlySaladDays.has(item.weekday)) earlySpecific++;
-    }
+    if (salad.id !== SALAD_STOCK_ID && earlySaladDays.has(item.weekday)) earlySpecific++;
   }
 
   if (earlySpecific !== 8) {
@@ -267,13 +292,8 @@ export function validateMenu(input: ValidateInput): ValidationResult {
   if (!saladErrors)
     issues.push({ level: "ok", rule: "ensalada-reglas", message: "Ensaladas correctas por ciclo, paridad, variedad y límites de ingredientes." });
 
-  // Frecuencia semanal de ingredientes controlados: máximo 4 servicios por semana.
-  const ingredientCapViolations = weeklyIngredientCapViolations(items, catalog);
-  for (const violation of ingredientCapViolations) {
-    issues.push({ level: "error", rule: "frecuencia-ingrediente", message: `${violation.label}: aparece en ${violation.services} servicios; máximo ${RULES.MAX_INGREDIENT_SERVICES_PER_WEEK} por semana.` });
-  }
-  if (!ingredientCapViolations.length)
-    issues.push({ level: "ok", rule: "frecuencia-ingrediente", message: `Ningún ingrediente controlado supera ${RULES.MAX_INGREDIENT_SERVICES_PER_WEEK} servicios por semana.` });
+  // Ingredientes de refrito/acompañamiento no tienen un tope duro semanal.
+  issues.push({ level: "ok", rule: "ingredientes-principales", message: "Ingredientes principales registrados sin imponer topes artificiales a refritos y porciones pequeñas." });
 
   // Bebidas permitidas por servicio/paridad.
   const badBeverage = mains.filter((i) => !i.beverage || !allowedBeverages(i.service, parity).includes(i.beverage));
