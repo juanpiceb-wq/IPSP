@@ -45,20 +45,23 @@ export function generateMenu(input: GenerateInput): GenerateOutput {
   // Si las propias reglas hacen imposible llegar a 21, no quemamos decenas de
   // intentos. Generamos la mejor propuesta parcial y mostramos la causa matemática.
   if (feasibility.maxMainMeals < RULES.MAIN_SLOTS) {
-    const partial = generateMenuAttempt(input, baseSeed);
+    const partial = generateMenuAttempt(input, baseSeed, Date.now() + 2500);
     return { ...partial, capacityWarning: feasibility.message };
   }
 
-  let best = generateMenuAttempt(input, baseSeed);
-  for (let attempt = 1; attempt <= 12; attempt++) {
+  // El generador corre dentro de una petición web: no debe agotar el tiempo de Vercel.
+  // Hacemos pocos intentos acotados y conservamos siempre la mejor solución encontrada.
+  const deadline = Date.now() + 2500;
+  let best = generateMenuAttempt(input, baseSeed, deadline);
+  for (let attempt = 1; attempt <= 3 && Date.now() < deadline; attempt++) {
     if (isCompleteGeneration(best, input)) return best;
-    const candidate = generateMenuAttempt(input, `${baseSeed}-${attempt}`);
+    const candidate = generateMenuAttempt(input, `${baseSeed}-${attempt}`, deadline);
     if (generationQuality(candidate, input) > generationQuality(best, input)) best = candidate;
   }
   return best;
 }
 
-function generateMenuAttempt(input: GenerateInput, seed: string): GenerateOutput {
+function generateMenuAttempt(input: GenerateInput, seed: string, deadline = Date.now() + 2500): GenerateOutput {
   const rng = makeRng(seed);
   const hist = buildHistoryIndex(input.history, input.year, input.week, input.campId, input.catalog);
   const ctx = buildContext(input.catalog, input.parity, input.arrival, hist);
@@ -109,7 +112,7 @@ function generateMenuAttempt(input: GenerateInput, seed: string): GenerateOutput
     .sort((a, b) => slotPriority(a.weekday, a.service) - slotPriority(b.weekday, b.service));
 
   const mainSearch: SearchConfig = {
-    input, ctx, rng, component: "main", nodeBudget: { used: 0, max: 30000 }, bestDepth: 0, bestState: cloneState(initial),
+    input, ctx, rng, component: "main", nodeBudget: { used: 0, max: 6000 }, deadline, bestDepth: 0, bestState: cloneState(initial),
   };
   const mainsResult = searchSlots(initial, mainSlots, 0, mainSearch);
 
@@ -120,7 +123,7 @@ function generateMenuAttempt(input: GenerateInput, seed: string): GenerateOutput
     .map((weekday) => ({ weekday, service: "lunch" as MainService }))
     .filter((slot) => !lockedMap.has(key(slot.weekday, slot.service, "soup")));
   const soupSearch: SearchConfig = {
-    input, ctx, rng, component: "soup", nodeBudget: { used: 0, max: 4000 }, bestDepth: 0, bestState: cloneState(afterMains),
+    input, ctx, rng, component: "soup", nodeBudget: { used: 0, max: 1500 }, deadline, bestDepth: 0, bestState: cloneState(afterMains),
   };
   const soupResult = searchSlots(afterMains, soupSlots, 0, soupSearch);
 
@@ -172,6 +175,7 @@ interface SearchConfig {
   rng: () => number;
   component: "main" | "soup";
   nodeBudget: { used: number; max: number };
+  deadline: number;
   bestDepth: number;
   bestState: SearchState | null;
 }
@@ -195,7 +199,7 @@ function searchSlots(
     if (cfg.component === "soup" && !soupCompositionSatisfied(state.items, cfg.input.catalog)) return null;
     return state;
   }
-  if (++cfg.nodeBudget.used > cfg.nodeBudget.max) return null;
+  if (Date.now() >= cfg.deadline || ++cfg.nodeBudget.used > cfg.nodeBudget.max) return null;
 
   const slot = slots[index];
   const candidates = candidateList({
