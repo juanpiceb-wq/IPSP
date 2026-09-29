@@ -140,11 +140,20 @@ export async function actionGenerateBulk(req: { year: number; week: number; camp
     const issueSets = camps.flatMap((camp) => { const shiftDays=weekdayShift(base.reception_weekday_default,camp.reception_weekday_default); return validateMenu({ items: shiftMenuItems(ai.items,shiftDays), catalog, parity, arrival: camp.reception_weekday_default, year:req.year, week:req.week, campId:camp.id, diners:camp.diners_default, history }).issues.filter(i=>i.level==="error").map(i=>i.message); });
     const repairIssues = [...new Set(issueSets)];
     console.log("[generate-ai-bulk] repair-start", { totalErrors, uniqueIssues: repairIssues.length });
-    ai = await generateMenuWithAI({ year:req.year, week:req.week, parity, campId:base.id, diners:base.diners_default, arrival:base.reception_weekday_default, catalog, history, currentItems:ai.items, repairIssues });
-    results = validateAll(ai.items);
-    primaryValidation = validateMenu({ items: ai.items, catalog, parity, arrival: base.reception_weekday_default, year: req.year, week: req.week, campId: base.id, diners: base.diners_default, history });
-    totalErrors = results.reduce((sum,row)=>sum+row.errors,0);
-    console.log("[generate-ai-bulk] repair-ready", { totalErrors });
+    try {
+      const repaired = await generateMenuWithAI({ year:req.year, week:req.week, parity, campId:base.id, diners:base.diners_default, arrival:base.reception_weekday_default, catalog, history, currentItems:ai.items, repairIssues });
+      const repairedResults = validateAll(repaired.items);
+      const repairedErrors = repairedResults.reduce((sum,row)=>sum+row.errors,0);
+      if (repairedErrors < totalErrors) {
+        ai = repaired;
+        results = repairedResults;
+        primaryValidation = validateMenu({ items: ai.items, catalog, parity, arrival: base.reception_weekday_default, year: req.year, week: req.week, campId: base.id, diners: base.diners_default, history });
+        totalErrors = repairedErrors;
+      }
+      console.log("[generate-ai-bulk] repair-ready", { totalErrors, repairedErrors });
+    } catch (error) {
+      console.warn("[generate-ai-bulk] repair-failed-using-initial", error instanceof Error ? error.message : String(error));
+    }
   }
   console.log("[generate-ai-bulk] ready", { camps: camps.length, totalErrors });
 
