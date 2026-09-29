@@ -4,7 +4,7 @@ import { WEEKDAYS } from "../types";
 import { addConsumption, availableQuantity, inventorySummary, recipeConsumptions } from "../supply";
 import { SALAD_STOCK_ID, mainAllowsSalad, saladAllowedForMain, saladIngredientViolations, saladTimingReason } from "../salads";
 import { blockingReason, buildContext, buildHistoryIndex, isMeaningfulBase, recencyWeight, weeklyDishKey } from "./context";
-import { adjacentSauceViolations, hasChickenOnFirstDay, soupCompositionCounts } from "./recipeRules";
+import { adjacentSauceViolations, hasChickenOnFirstDay, soupCompositionCounts } from "../recipeRules";
 
 export interface ValidateInput {
   items: MenuItem[];
