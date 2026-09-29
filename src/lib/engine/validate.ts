@@ -1,7 +1,7 @@
 ﻿import type { Catalog, MenuItem, MenuMetrics, Parity, ValidationIssue, Weekday, WeeklyMenu } from "../types";
 import { RULES, allowedBeverages, cycleOrder } from "../rules";
 import { WEEKDAYS } from "../types";
-import { addConsumption, availableQuantity, inventorySummary, recipeConsumptions } from "../supply";
+import { addConsumption, availableQuantity, inventorySummary, isHardStockKey, recipeConsumptions } from "../supply";
 import { SALAD_STOCK_ID, mainAllowsSalad, saladAllowedForMain, saladIngredientViolations, saladTimingReason } from "../salads";
 import { blockingReason, buildContext, buildHistoryIndex, isMeaningfulBase, recencyWeight, weeklyDishKey } from "./context";
 import { adjacentSauceViolations, hasChickenOnFirstDay, soupCompositionCounts } from "../recipeRules";
@@ -225,7 +225,7 @@ export function validateMenu(input: ValidateInput): ValidationResult {
   }
   if (!baseRepeats) issues.push({ level: "ok", rule: "base-consecutiva", message: "No se repiten ingredientes base dominantes en días consecutivos." });
 
-  // Ensaladas: mínimo operativo flexible de 7/14 servicios.
+  // Ensaladas: mínimo operativo flexible de 5/14 servicios.
   // Solo se asignan cuando el plato fuerte admite ensalada y la combinación es compatible.
   const forbiddenSalads = lunchDinner.filter((i) => {
     if (!i.salad_recipe_id || !i.recipe_id) return false;
@@ -300,7 +300,7 @@ export function validateMenu(input: ValidateInput): ValidationResult {
   }
   let stockErrors = 0;
   for (const row of inventorySummary(ledger, input.diners)) {
-    if (row.used > row.cap + 1e-9) {
+    if (isHardStockKey(row.key) && row.used > row.cap + 1e-9) {
       stockErrors++;
       issues.push({ level: "error", rule: "stock", message: `${row.label}: consumo ${round(row.used)} ${row.unit} > disponible ${round(row.cap)} ${row.unit}.` });
     }
@@ -377,7 +377,7 @@ export function menuStockReason(items: MenuItem[], candidate: { recipe_id: strin
   }
   for (const c of recipeConsumptions(recipe, diners)) {
     const cap = availableQuantity(c.key, diners);
-    if (cap != null && (ledger.get(c.key) ?? 0) + c.quantity > cap + 1e-9) return `${c.label} excedería el stock semanal.`;
+    if (isHardStockKey(c.key) && cap != null && (ledger.get(c.key) ?? 0) + c.quantity > cap + 1e-9) return `${c.label} excedería el stock semanal.`;
   }
   return null;
 }
