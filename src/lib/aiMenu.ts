@@ -31,14 +31,14 @@ CATALOGO=${JSON.stringify(recipes)}
 BLOQUEADOS=${JSON.stringify(locked)}
 RECIENTES=${JSON.stringify(recent)}`;
  const schema={type:"object",additionalProperties:false,required:["items"],properties:{items:{type:"array",minItems:27,maxItems:27,items:{type:"object",additionalProperties:false,required:["weekday","service","component","recipe_id","salad_recipe_id"],properties:{weekday:{type:"integer",minimum:0,maximum:6},service:{type:"string",enum:["breakfast","lunch","dinner"]},component:{type:"string",enum:["main","soup"]},recipe_id:{type:"string"},salad_recipe_id:{type:["string","null"]}}}}}};
- const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),45000);
+ const controller=new AbortController();const timeoutMs=20000;const timer=setTimeout(()=>controller.abort(),timeoutMs);\n console.log("[openai-menu] request-start",{model:process.env.OPENAI_MENU_MODEL||"gpt-5.6-luna",recipes:recipes.length,history:recent.length,timeoutMs});
  try{
   const res=await fetch("https://api.openai.com/v1/responses",{method:"POST",headers:{Authorization:`Bearer ${apiKey}`,"Content-Type":"application/json"},signal:controller.signal,body:JSON.stringify({model:process.env.OPENAI_MENU_MODEL||"gpt-5.6-luna",store:false,reasoning:{effort:"medium"},input:[{role:"user",content:[{type:"input_text",text:prompt}]}],text:{format:{type:"json_schema",name:"ipsp_weekly_menu",strict:true,schema}}})});
-  if(!res.ok) throw new Error(`OpenAI respondió ${res.status}: ${(await res.text()).slice(0,500)}`);
+  console.log("[openai-menu] response",{status:res.status,ok:res.ok});\n  if(!res.ok) throw new Error(`OpenAI respondió ${res.status}: ${(await res.text()).slice(0,500)}`);
   const data:any=await res.json();const outputText=data.output?.flatMap((o:any)=>o.content??[]).find((x:any)=>x.type==="output_text")?.text;
   if(!outputText) throw new Error("OpenAI no devolvió un menú estructurado.");
   const parsed=JSON.parse(outputText) as {items:AiChoice[]};const recipeById=new Map(input.catalog.recipes.map(r=>[r.id,r]));
   const items:MenuItem[]=parsed.items.map(x=>{const r=recipeById.get(x.recipe_id);if(!r)throw new Error(`recipe_id inexistente: ${x.recipe_id}`);if(x.salad_recipe_id&&!recipeById.has(x.salad_recipe_id))throw new Error(`salad_recipe_id inexistente: ${x.salad_recipe_id}`);return{weekday:x.weekday as Weekday,service:x.service,component:x.component,recipe_id:x.recipe_id,protein_id:r.primary_protein_id,salad_recipe_id:x.component==="main"?x.salad_recipe_id:null,beverage:x.component==="main"?beverageLabel(x.service,input.parity):null,locked:false,reasons:["Propuesto por IA y verificado por el validador IPSP."],execution_status:"pending",replacement_name:null};});
   return{items,seed:`ai-${Date.now()}`};
- }finally{clearTimeout(timer);}
+ }catch(err:any){\n  if(err?.name==="AbortError"){console.error("[openai-menu] timeout",{timeoutMs});throw new Error(`OpenAI no respondió en ${timeoutMs/1000} segundos. Intente nuevamente.`);}\n  console.error("[openai-menu] error",err instanceof Error?err.message:String(err));throw err;\n }finally{clearTimeout(timer);}
 }
