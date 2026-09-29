@@ -137,11 +137,11 @@ export function blockingReason(
 
   const protein = recipe.primary_protein_id ? ctx.proteinsById.get(recipe.primary_protein_id) : null;
 
-  // Fritada no va en desayuno salvo Estofado de chancho; chuleta nunca va en desayuno.
-  if (service === "breakfast" && recipe.primary_protein_id === "fritada" && recipe.id !== "estofado-de-chancho")
-    return "Fritada no puede utilizarse en desayuno; Estofado de chancho es la única excepción.";
-  if (service === "breakfast" && recipe.primary_protein_id === "chuleta-cerdo")
-    return "Chuleta de cerdo no puede utilizarse en desayuno.";
+  // Cerdo en desayuno: únicamente las cinco preparaciones aprobadas operativamente.
+  const porkBreakfastIds = new Set(["bistec-de-cerdo","empanada-de-harina-con-cuero-frito","tigrillo-con-bistec-de-cerdo","tigrillo-de-verde-con-cuero-de-cerdo","tortilla-de-mote-con-chicharron"]);
+  const porkProteinIds = new Set(["fritada","chuleta-cerdo","lomo-cerdo","cuero-cerdo"]);
+  if (service === "breakfast" && recipe.primary_protein_id && porkProteinIds.has(recipe.primary_protein_id) && !porkBreakfastIds.has(recipe.id))
+    return "Esta preparación de cerdo no está dentro de las cinco habilitadas para desayuno.";
 
   if (protein) {
     if (!protein.active) return `La proteína ${protein.name} está desactivada.`;
