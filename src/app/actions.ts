@@ -117,8 +117,10 @@ export async function actionGenerateBulk(req: { year: number; week: number; camp
 
   const validateAll = (items: MenuItem[]) => camps.map((camp) => {
     const shiftDays = weekdayShift(base.reception_weekday_default, camp.reception_weekday_default);
+    const shiftDays = weekdayShift(base.reception_weekday_default, camp.reception_weekday_default);
+    const shiftedItems = shiftMenuItems(items, shiftDays);
     const v = validateMenu({
-      items, catalog, parity, arrival: base.reception_weekday_default,
+      items: shiftedItems, catalog, parity, arrival: camp.reception_weekday_default,
       year: req.year, week: req.week, campId: camp.id, diners: camp.diners_default, history,
     });
     return {
@@ -136,7 +138,7 @@ export async function actionGenerateBulk(req: { year: number; week: number; camp
   });
   let totalErrors = results.reduce((sum, row) => sum + row.errors, 0);
   if (totalErrors > 0) {
-    const issueSets = camps.flatMap((camp) => validateMenu({ items: ai.items, catalog, parity, arrival: base.reception_weekday_default, year: req.year, week: req.week, campId: camp.id, diners: camp.diners_default, history }).issues.filter(i => i.level === "error").map(i => i.message));
+    const issueSets = camps.flatMap((camp) => { const shiftDays=weekdayShift(base.reception_weekday_default,camp.reception_weekday_default); return validateMenu({ items: shiftMenuItems(ai.items,shiftDays), catalog, parity, arrival: camp.reception_weekday_default, year:req.year, week:req.week, campId:camp.id, diners:camp.diners_default, history }).issues.filter(i=>i.level==="error").map(i=>i.message); });
     const repairIssues = [...new Set(issueSets)];
     console.log("[generate-ai-bulk] repair-start", { totalErrors, uniqueIssues: repairIssues.length });
     ai = await generateMenuWithAI({ year:req.year, week:req.week, parity, campId:base.id, diners:base.diners_default, arrival:base.reception_weekday_default, catalog, history, currentItems:ai.items, repairIssues });
