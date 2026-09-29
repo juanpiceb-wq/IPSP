@@ -117,7 +117,6 @@ export async function actionGenerateBulk(req: { year: number; week: number; camp
 
   const validateAll = (items: MenuItem[]) => camps.map((camp) => {
     const shiftDays = weekdayShift(base.reception_weekday_default, camp.reception_weekday_default);
-    const shiftDays = weekdayShift(base.reception_weekday_default, camp.reception_weekday_default);
     const shiftedItems = shiftMenuItems(items, shiftDays);
     const v = validateMenu({
       items: shiftedItems, catalog, parity, arrival: camp.reception_weekday_default,
