@@ -119,8 +119,8 @@ export async function actionGenerateBulk(req: { year: number; week: number; camp
         const shift = weekdayShift(base.reception_weekday_default, camp.reception_weekday_default);
         const day = (((d + shift) % 7) as Weekday);
         const ctx = buildContext(catalog, parity, camp.reception_weekday_default, histIndex);
-        const valid = new Set(catalog.recipes.filter(r=>r.active&&!r.services.includes("salad")&&!blockingReason(r,service,day,ctx)).map(r=>r.id));
-        ids = ids ? new Set([...ids].filter(id=>valid.has(id))) : valid;
+        const valid = new Set<string>(catalog.recipes.filter(r=>r.active&&!r.services.includes("salad")&&!blockingReason(r,service,day,ctx)).map(r=>r.id));
+        ids = ids ? new Set<string>(Array.from(ids).filter((id: string)=>valid.has(id))) : valid;
       }
       safeSlots.push({weekday:d,service,component:"main",ids:[...(ids??new Set<string>())]});
     }
@@ -130,8 +130,8 @@ export async function actionGenerateBulk(req: { year: number; week: number; camp
         const shift = weekdayShift(base.reception_weekday_default, camp.reception_weekday_default);
         const day = (((d + shift) % 7) as Weekday);
         const ctx = buildContext(catalog, parity, camp.reception_weekday_default, histIndex);
-        const valid = new Set(catalog.recipes.filter(r=>r.active&&!blockingReason(r,"soup",day,ctx)).map(r=>r.id));
-        ids = ids ? new Set([...ids].filter(id=>valid.has(id))) : valid;
+        const valid = new Set<string>(catalog.recipes.filter(r=>r.active&&!blockingReason(r,"soup",day,ctx)).map(r=>r.id));
+        ids = ids ? new Set<string>(Array.from(ids).filter((id: string)=>valid.has(id))) : valid;
       }
       safeSlots.push({weekday:d,service:"lunch",component:"soup",ids:[...(ids??new Set<string>())]});
     }
