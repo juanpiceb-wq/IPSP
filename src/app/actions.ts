@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getRepo, newId, slugify } from "@/lib/db";
 import { generateMenu } from "@/lib/engine/generate";
+import { generateMenuWithAI } from "@/lib/aiMenu";
 import { validateMenu } from "@/lib/engine/validate";
 import { cycleDates } from "@/lib/dates";
 import { parityOfWeek, RULES } from "@/lib/rules";
@@ -43,44 +44,44 @@ export interface GenerateResponse {
 export async function actionGenerate(req: GenerateRequest): Promise<GenerateResponse> {
   const repo = getRepo();
   const started = Date.now();
-  console.log("[generate] start", { campId: req.campId, year: req.year, week: req.week });
+  console.log("[generate-ai] start", { campId: req.campId, year: req.year, week: req.week });
 
-  // No permitimos que una consulta externa deje la Server Action abierta hasta el timeout de Vercel.
   const withTimeout = async <T>(label: string, promise: Promise<T>, ms = 8000): Promise<T> => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
         promise,
-        new Promise<T>((_, reject) => {
-          timer = setTimeout(() => reject(new Error(`${label} excedió ${ms} ms`)), ms);
-        }),
+        new Promise<T>((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} excedió ${ms} ms`)), ms); }),
       ]);
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
+    } finally { if (timer) clearTimeout(timer); }
   };
 
   const [catalog, history] = await Promise.all([
     withTimeout("Catálogo", repo.getCatalog()),
     withTimeout("Historial", repo.listMenus({ campId: req.campId, limit: RULES.HISTORY_WEEKS + 2 })),
   ]);
-  console.log("[generate] data-ready", { ms: Date.now() - started, recipes: catalog.recipes.length, history: history.length });
-
   const parity = parityOfWeek(req.week);
-  const generationStarted = Date.now();
-  const gen = generateMenu({
+  console.log("[generate-ai] data-ready", { ms: Date.now() - started, recipes: catalog.recipes.length, history: history.length });
+
+  const ai = await generateMenuWithAI({
     year: req.year, week: req.week, parity, campId: req.campId, diners: req.diners,
-    arrival: req.arrival, catalog, history, locked: req.locked, seed: req.seed,
+    arrival: req.arrival, catalog, history, locked: req.locked,
   });
-  console.log("[generate] engine-ready", { ms: Date.now() - generationStarted, totalMs: Date.now() - started, items: gen.items.length });
-  const validationStarted = Date.now();
+  console.log("[generate-ai] model-ready", { totalMs: Date.now() - started, items: ai.items.length });
+
   const validation = validateMenu({
-    items: gen.items, catalog, parity, arrival: req.arrival, year: req.year, week: req.week,
+    items: ai.items, catalog, parity, arrival: req.arrival, year: req.year, week: req.week,
     campId: req.campId, diners: req.diners, history,
   });
-  console.log("[generate] validation-ready", { ms: Date.now() - validationStarted, totalMs: Date.now() - started, errors: validation.metrics.errors });
+  console.log("[generate-ai] validation-ready", { totalMs: Date.now() - started, errors: validation.metrics.errors });
+
   const { start, end } = cycleDates(req.year, req.week, req.arrival);
-  return { items: gen.items, seed: gen.seed, issues: validation.issues, metrics: validation.metrics, capacityWarning: gen.capacityWarning, start, end };
+  const hardErrors = validation.issues.filter((i) => i.level === "error").length;
+  return {
+    items: ai.items, seed: ai.seed, issues: validation.issues, metrics: validation.metrics,
+    capacityWarning: hardErrors ? `La IA generó el menú, pero el validador detectó ${hardErrors} regla(s) dura(s) por corregir.` : null,
+    start, end,
+  };
 }
 
 export interface BulkCampResult {
