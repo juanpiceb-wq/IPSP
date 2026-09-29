@@ -42,21 +42,43 @@ export interface GenerateResponse {
 
 export async function actionGenerate(req: GenerateRequest): Promise<GenerateResponse> {
   const repo = getRepo();
-  // La generación solo necesita el historial reciente del campamento seleccionado.
-  // Evitamos cargar todos los menús y todos sus items de todos los campamentos.
+  const started = Date.now();
+  console.log("[generate] start", { campId: req.campId, year: req.year, week: req.week });
+
+  // No permitimos que una consulta externa deje la Server Action abierta hasta el timeout de Vercel.
+  const withTimeout = async <T>(label: string, promise: Promise<T>, ms = 8000): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`${label} excedió ${ms} ms`)), ms);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+
   const [catalog, history] = await Promise.all([
-    repo.getCatalog(),
-    repo.listMenus({ campId: req.campId, limit: RULES.HISTORY_WEEKS + 2 }),
+    withTimeout("Catálogo", repo.getCatalog()),
+    withTimeout("Historial", repo.listMenus({ campId: req.campId, limit: RULES.HISTORY_WEEKS + 2 })),
   ]);
+  console.log("[generate] data-ready", { ms: Date.now() - started, recipes: catalog.recipes.length, history: history.length });
+
   const parity = parityOfWeek(req.week);
+  const generationStarted = Date.now();
   const gen = generateMenu({
     year: req.year, week: req.week, parity, campId: req.campId, diners: req.diners,
     arrival: req.arrival, catalog, history, locked: req.locked, seed: req.seed,
   });
+  console.log("[generate] engine-ready", { ms: Date.now() - generationStarted, totalMs: Date.now() - started, items: gen.items.length });
+  const validationStarted = Date.now();
   const validation = validateMenu({
     items: gen.items, catalog, parity, arrival: req.arrival, year: req.year, week: req.week,
     campId: req.campId, diners: req.diners, history,
   });
+  console.log("[generate] validation-ready", { ms: Date.now() - validationStarted, totalMs: Date.now() - started, errors: validation.metrics.errors });
   const { start, end } = cycleDates(req.year, req.week, req.arrival);
   return { items: gen.items, seed: gen.seed, issues: validation.issues, metrics: validation.metrics, capacityWarning: gen.capacityWarning, start, end };
 }
