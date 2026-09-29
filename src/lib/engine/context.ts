@@ -113,15 +113,7 @@ export function blockingReason(
   ctx: EngineContext
 ): string | null {
   if (!recipe.active) return "La preparación está desactivada.";
-  const operationalBreakfast = service === "breakfast"
-    && !!recipe.primary_protein_id
-    && recipe.primary_protein_id !== "sardina"
-    && !recipe.double_fry
-    && !recipe.services.includes("soup")
-    && !recipe.services.includes("salad")
-    && (recipe.services.includes("lunch") || recipe.services.includes("dinner"));
-  const sardineCorvicheBreakfast = service === "breakfast" && recipe.id === "corviche-de-sardina";
-  if (!recipe.services.includes(service) && !operationalBreakfast && !sardineCorvicheBreakfast)
+  if (!recipe.services.includes(service))
     return `“${recipe.name}” no está habilitada para este servicio.`;
 
   if (recipe.only_weekday !== null && recipe.only_weekday !== undefined && recipe.only_weekday !== weekday)
@@ -145,11 +137,11 @@ export function blockingReason(
 
   const protein = recipe.primary_protein_id ? ctx.proteinsById.get(recipe.primary_protein_id) : null;
 
-  // Regla operativa: fritada y chuleta de cerdo nunca se programan en desayuno.
-  if (service === "breakfast" && (recipe.primary_protein_id === "fritada" || recipe.primary_protein_id === "chuleta-cerdo"))
-    return recipe.primary_protein_id === "fritada"
-      ? "Fritada no puede utilizarse en desayuno."
-      : "Chuleta de cerdo no puede utilizarse en desayuno.";
+  // Fritada no va en desayuno salvo Estofado de chancho; chuleta nunca va en desayuno.
+  if (service === "breakfast" && recipe.primary_protein_id === "fritada" && recipe.id !== "estofado-de-chancho")
+    return "Fritada no puede utilizarse en desayuno; Estofado de chancho es la única excepción.";
+  if (service === "breakfast" && recipe.primary_protein_id === "chuleta-cerdo")
+    return "Chuleta de cerdo no puede utilizarse en desayuno.";
 
   if (protein) {
     if (!protein.active) return `La proteína ${protein.name} está desactivada.`;
@@ -162,12 +154,15 @@ export function blockingReason(
     }
     const operationalSoupOnly = protein.soup_only || ["hueso-carnudo", "costilla-res", "pata-res"].includes(protein.id);
     if (operationalSoupOnly && service !== "soup") return `${protein.name} solo puede utilizarse en sopa.`;
-    if (!operationalSoupOnly && service === "soup") return "En sopa solo pueden usarse hueso carnudo, costilla o pata.";
+    // Una receta declarada explícitamente como sopa puede usar otra proteína (p. ej. Viche de camarón).
     const hardProteinParity = protein.id === "costilla-res" || protein.id === "atun" ? "par"
       : protein.id === "pata-res" || protein.id === "sardina" ? "impar"
       : protein.parity;
     if (hardProteinParity !== "todas" && hardProteinParity !== ctx.parity)
       return `${protein.name} corresponde a semana ${hardProteinParity} y esta es semana ${ctx.parity}.`;
+
+    if ((protein.id === "pata-res" || protein.id === "costilla-res") && cyclePosition(weekday, ctx.arrival) < 4)
+      return `${protein.name} solo puede programarse desde el día 4 del ciclo posterior a la recepción de víveres.`;
 
     // Las 20 lb de filete se reservan primero para el ceviche dominical obligatorio.
     if (protein.id === "tilapia" && ctx.sundayLunchRecipeId && recipe.id !== ctx.sundayLunchRecipeId)
@@ -197,8 +192,8 @@ export function blockingReason(
   const ripePlantain = usesRipePlantain(recipe);
 
   // Ciclo operativo vigente:
-  // día 1-3 después de la recepción = verde;
-  // desde el día 4 = maduro.
+  // días 1-4 después de la recepción = verde;
+  // desde el día 5 = maduro.
   // El ceviche dominical conserva la excepción de chifle reservado/procesado
   // dentro de la ventana válida de verde.
   if (greenPlantain && recipe.id !== ctx.sundayLunchRecipeId && pos > RULES.GREEN_PLANTAIN_DAYS)
@@ -243,7 +238,7 @@ const HARD_PRODUCT_PARITY: Record<string, "todas" | Parity> = {
 
 export function effectiveRestrictiveProductIds(recipe: Recipe): string[] {
   const ids = new Set(recipe.restrictive_product_ids ?? []);
-  const text = normalize(`${recipe.name} ${recipe.base_ingredient ?? ""}`);
+  const text = normalize(`${recipe.name} ${recipe.base_ingredient ?? ""} ${(recipe.main_ingredients ?? []).join(" ")}`);
 
   const addIf = (test: boolean, id: string) => { if (test) ids.add(id); };
   addIf(recipe.primary_protein_id === "costilla-res" || text.includes("costilla de res"), "costilla-res-prod");
@@ -257,7 +252,8 @@ export function effectiveRestrictiveProductIds(recipe: Recipe): string[] {
   addIf(text.includes("pepino"), "pepino");
   addIf(text.includes("rabano"), "rabano");
   addIf(text.includes("remolacha"), "remolacha");
-  addIf(text.includes("garbanzo"), "garbanzo");
+  const genericLegumeSoup = recipe.services.includes("soup") && (text.includes("legumbre") || text.includes("crema de garbanzo"));
+  if (!genericLegumeSoup) addIf(text.includes("garbanzo"), "garbanzo");
   addIf(text.includes("mote"), "mote");
   addIf(text.includes("quaker") || text.includes("avena"), "quaker");
   addIf(text.includes("aji"), "aji");
@@ -265,7 +261,7 @@ export function effectiveRestrictiveProductIds(recipe: Recipe): string[] {
   addIf(text.includes("comino"), "comino");
   addIf(text.includes("pimienta negra"), "pimienta-negra");
   addIf(text.includes("la sazon"), "sazonador-la-sazon");
-  addIf(text.includes("verdura"), "verdura");
+  if (!(recipe.services.includes("soup") && text.includes("legumbre"))) addIf(text.includes("verdura"), "verdura");
 
   return [...ids];
 }
@@ -279,7 +275,7 @@ function normalize(value: string) {
 
 function usesGreenPlantain(recipe: Recipe) {
   if (recipe.base_ingredient === "Plátano verde") return true;
-  const text = normalize(`${recipe.name} ${recipe.base_ingredient ?? ""}`);
+  const text = normalize(`${recipe.name} ${recipe.base_ingredient ?? ""} ${(recipe.main_ingredients ?? []).join(" ")}`);
   return /\bverde\b/.test(text)
     || /\bpatacon(?:es)?\b/.test(text)
     || /\bbolon\b/.test(text)
@@ -290,7 +286,7 @@ function usesGreenPlantain(recipe: Recipe) {
 
 function usesRipePlantain(recipe: Recipe) {
   if (recipe.base_ingredient === "Plátano maduro") return true;
-  const text = normalize(`${recipe.name} ${recipe.base_ingredient ?? ""}`);
+  const text = normalize(`${recipe.name} ${recipe.base_ingredient ?? ""} ${(recipe.main_ingredients ?? []).join(" ")}`);
   return /\bmaduro(?:s)?\b/.test(text)
     || /\btajada(?:s)? de maduro\b/.test(text);
 }
