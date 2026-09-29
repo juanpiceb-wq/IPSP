@@ -53,10 +53,11 @@ const LATEST_MASTER_RECIPES: Recipe[] = MASTER_RECIPES_V2.map((r) => {
   }
   // Sopa/ensalada, doble fritura y platos fijos conservan exactamente su restricción de servicio.
   if (r.services.includes("soup") || r.services.includes("salad") || r.double_fry || r.fixed_service || r.only_weekday != null) return r;
-  // Regla vigente: las demás proteínas generales pueden participar en desayuno,
-  // excepto Fritada y Chuleta de cerdo.
+  // Regla vigente: las demás proteínas generales pueden participar en desayuno.
+  // Para cerdo, la única preparación habilitada en desayuno es Estofado de chancho (tratada arriba).
   if (r.primary_protein_id && (r.services.includes("lunch") || r.services.includes("dinner"))) {
-    if (r.primary_protein_id === "fritada" || r.primary_protein_id === "chuleta-cerdo") return r;
+    const porkProteinIds = new Set(["fritada", "chuleta-cerdo", "lomo-cerdo", "cuero-cerdo", "chorizo"]);
+    if (porkProteinIds.has(r.primary_protein_id)) return r;
     return { ...r, services: Array.from(new Set<Recipe["services"][number]>(["breakfast", ...r.services])) };
   }
   return r;
