@@ -225,8 +225,8 @@ export function validateMenu(input: ValidateInput): ValidationResult {
   }
   if (!baseRepeats) issues.push({ level: "ok", rule: "base-consecutiva", message: "No se repiten ingredientes base dominantes en días consecutivos." });
 
-  // Ensaladas: 8 recetas específicas en los primeros 5 días del ciclo +
-  // 1 "Ensalada según stock" en cada uno de los días 6 y 7 = 10/14.
+  // Ensaladas: mínimo operativo flexible de 7/14 servicios.
+  // Solo se asignan cuando el plato fuerte admite ensalada y la combinación es compatible.
   const forbiddenSalads = lunchDinner.filter((i) => {
     if (!i.salad_recipe_id || !i.recipe_id) return false;
     const main = catalog.recipes.find((r) => r.id === i.recipe_id);
@@ -238,18 +238,11 @@ export function validateMenu(input: ValidateInput): ValidationResult {
   }
   const saladCount = lunchDinner.filter((i) => !!i.salad_recipe_id).length;
   if (saladCount < RULES.SALAD_MIN)
-    issues.push({ level: "error", rule: "ensaladas", message: `${saladCount}/${RULES.SALAD_SERVICES} servicios con ensalada; se requieren ${RULES.SALAD_TARGET}.` });
-  else if (saladCount > RULES.SALAD_TARGET)
-    issues.push({ level: "warn", rule: "ensaladas", message: `${saladCount}/${RULES.SALAD_SERVICES} servicios con ensalada; el objetivo operativo es ${RULES.SALAD_TARGET}.` });
+    issues.push({ level: "error", rule: "ensaladas", message: `${saladCount}/${RULES.SALAD_SERVICES} servicios con ensalada; se requieren al menos ${RULES.SALAD_MIN}.` });
   else
-    issues.push({ level: "ok", rule: "ensaladas", message: "10/14 servicios con ensalada: 8 específicas + 2 según stock." });
+    issues.push({ level: "ok", rule: "ensaladas", message: `${saladCount}/${RULES.SALAD_SERVICES} servicios con ensalada; cumple el mínimo de ${RULES.SALAD_MIN}.` });
 
-  let earlySpecific = 0;
   let saladErrors = 0;
-  const orderForSalads = cycleOrder(input.arrival);
-  const earlySaladDays = new Set(orderForSalads.slice(0, 5));
-  const lateSaladDays = orderForSalads.slice(5, 7);
-
   for (const item of lunchDinner) {
     if (!item.salad_recipe_id) continue;
     const salad = catalog.recipes.find((r) => r.id === item.salad_recipe_id);
@@ -262,25 +255,6 @@ export function validateMenu(input: ValidateInput): ValidationResult {
     if (main && !saladAllowedForMain(main, salad)) {
       saladErrors++;
       issues.push({ level: "error", rule: "ensalada-compatibilidad", message: `${WEEKDAYS[item.weekday].label} · ${item.service === "lunch" ? "almuerzo" : "cena"}: ${main.name} no debe acompañarse con ${salad.name}.`, weekday: item.weekday, service: item.service });
-    }
-    const restriction = blockingReason(salad, "salad", item.weekday, ctx) ?? saladTimingReason(salad.id, item.weekday, input.arrival);
-    if (restriction) {
-      saladErrors++;
-      issues.push({ level: "error", rule: "ensalada-restriccion", message: `${WEEKDAYS[item.weekday].label} · ${item.service === "lunch" ? "almuerzo" : "cena"}: ${restriction}`, weekday: item.weekday, service: item.service });
-    }
-    if (salad.id !== SALAD_STOCK_ID && earlySaladDays.has(item.weekday)) earlySpecific++;
-  }
-
-  if (earlySpecific !== 8) {
-    saladErrors++;
-    issues.push({ level: "error", rule: "ensalada-primeros-dias", message: `Los primeros 5 días del ciclo deben contener exactamente 8 ensaladas específicas; hay ${earlySpecific}.` });
-  }
-
-  for (const day of lateSaladDays) {
-    const daySalads = lunchDinner.filter((i) => i.weekday === day && i.salad_recipe_id === SALAD_STOCK_ID).length;
-    if (daySalads !== 1) {
-      saladErrors++;
-      issues.push({ level: "error", rule: "ensalada-stock", message: `${WEEKDAYS[day].label}: debe existir exactamente una "Ensalada según stock" en almuerzo o cena.`, weekday: day });
     }
   }
 
