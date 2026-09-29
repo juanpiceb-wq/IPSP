@@ -47,6 +47,10 @@ const LATEST_MASTER_RECIPES: Recipe[] = MASTER_RECIPES_V2.map((r) => {
   }
   // Atún y Huevo conservan sus preparaciones exclusivas de desayuno.
   if (r.primary_protein_id === "atun" || r.primary_protein_id === "huevo") return r;
+  // De las preparaciones de chancho asociadas a Fritada, solo Estofado de chancho puede ir en desayuno.
+  if (r.id === "estofado-de-chancho") {
+    return { ...r, services: Array.from(new Set<Recipe["services"][number]>(["breakfast", ...r.services])) };
+  }
   // Sopa/ensalada, doble fritura y platos fijos conservan exactamente su restricción de servicio.
   if (r.services.includes("soup") || r.services.includes("salad") || r.double_fry || r.fixed_service || r.only_weekday != null) return r;
   // Regla vigente: las demás proteínas generales pueden participar en desayuno,
