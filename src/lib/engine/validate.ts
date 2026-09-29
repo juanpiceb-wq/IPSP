@@ -261,7 +261,7 @@ export function validateMenu(input: ValidateInput): ValidationResult {
   const saladIngredientErrors = saladIngredientViolations(lunchDinner);
   for (const x of saladIngredientErrors) {
     saladErrors++;
-    issues.push({ level: "error", rule: "ensalada-ingrediente", message: `${x.label}: aparece en ${x.used} ensaladas; máximo semanal ${x.max} según disponibilidad.` });
+    issues.push({ level: "warn", rule: "ensalada-ingrediente", message: `${x.label}: aparece en ${x.used} ensaladas; referencia semanal ${x.max} según disponibilidad.` });
   }
   if (!saladErrors)
     issues.push({ level: "ok", rule: "ensalada-reglas", message: "Ensaladas correctas por ciclo, paridad, variedad y límites de ingredientes." });
