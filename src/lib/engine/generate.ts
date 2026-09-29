@@ -512,18 +512,11 @@ function assignSalads(items: MenuItem[], input: GenerateInput, ctx: EngineContex
     return !!main && mainAllowsSalad(main);
   });
 
-  for (const day of lateDays) {
-    const dayItems = eligibleTargets.filter((i) => i.weekday === day);
-    if (dayItems.some((i) => i.locked && i.salad_recipe_id === SALAD_STOCK_ID)) continue;
-    const free = dayItems.filter((i) => !i.locked)
-      .map((item) => ({ item, difficulty: mainRecipe(item)?.difficulty ?? 1, n: rng() }))
-      .sort((a,b) => a.difficulty-b.difficulty || a.n-b.n);
-    if (free[0]) free[0].item.salad_recipe_id = SALAD_STOCK_ID;
-  }
-
+  // Con el nuevo mínimo de 7, la ensalada según stock deja de ser obligatoria
+  // en los días 6 y 7; se priorizan ensaladas compatibles sin forzar acompañamientos.
   const earlyTargets = eligibleTargets.filter((i) => earlyDays.has(i.weekday));
   const lockedSpecific = earlyTargets.filter((i) => i.locked && i.salad_recipe_id && i.salad_recipe_id !== SALAD_STOCK_ID).length;
-  const needed = Math.max(0, 8 - lockedSpecific);
+  const needed = Math.max(0, RULES.SALAD_TARGET - lockedSpecific);
   const selectedSlots = earlyTargets.filter((i)=>!i.locked)
     .map((item)=>({item,difficulty:mainRecipe(item)?.difficulty??1,n:rng()}))
     .sort((a,b)=>a.difficulty-b.difficulty||a.n-b.n).slice(0,needed).map((x)=>x.item);
