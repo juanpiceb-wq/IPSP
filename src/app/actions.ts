@@ -5,7 +5,7 @@ import { getRepo, newId, slugify } from "@/lib/db";
 import { generateMenu } from "@/lib/engine/generate";
 import { validateMenu } from "@/lib/engine/validate";
 import { cycleDates } from "@/lib/dates";
-import { parityOfWeek } from "@/lib/rules";
+import { parityOfWeek, RULES } from "@/lib/rules";
 import { assertCanManageExecution, assertGeneralAdmin } from "@/lib/access";
 import type {
   Camp,
@@ -42,7 +42,12 @@ export interface GenerateResponse {
 
 export async function actionGenerate(req: GenerateRequest): Promise<GenerateResponse> {
   const repo = getRepo();
-  const [catalog, history] = await Promise.all([repo.getCatalog(), repo.listMenus()]);
+  // La generación solo necesita el historial reciente del campamento seleccionado.
+  // Evitamos cargar todos los menús y todos sus items de todos los campamentos.
+  const [catalog, history] = await Promise.all([
+    repo.getCatalog(),
+    repo.listMenus({ campId: req.campId, limit: RULES.HISTORY_WEEKS + 2 }),
+  ]);
   const parity = parityOfWeek(req.week);
   const gen = generateMenu({
     year: req.year, week: req.week, parity, campId: req.campId, diners: req.diners,
