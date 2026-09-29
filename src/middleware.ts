@@ -14,6 +14,19 @@ function client() {
 export async function middleware(req: NextRequest) {
   const pathname = req.nextUrl.pathname;
   const isPublic = pathname === "/login" || pathname.startsWith("/_next") || pathname === "/favicon.ico";
+
+  // Las Server Actions de Next.js llegan como POST a la ruta actual.
+  // No repetimos auth.getUser/refreshSession en Edge para esos POST: esa llamada remota
+  // puede dejar la acción esperando antes de alcanzar el runtime serverless.
+  // Exigimos la cookie de sesión y dejamos que las acciones sensibles mantengan sus
+  // propias comprobaciones de autorización.
+  if (req.method === "POST") {
+    const hasSession = !!req.cookies.get(ACCESS_COOKIE)?.value || !!req.cookies.get(REFRESH_COOKIE)?.value;
+    if (hasSession) return NextResponse.next();
+    if (isPublic) return NextResponse.next();
+    return NextResponse.redirect(new URL("/login", req.url));
+  }
+
   const db = client();
 
   // En desarrollo sin Supabase se conserva el modo demo.
