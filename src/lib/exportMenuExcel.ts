@@ -19,6 +19,11 @@ export function exportMenuExcel(args: ExportArgs) {
   const proteinName = (id: string | null | undefined) => id ? args.catalog.proteins.find((p) => p.id === id)?.name ?? "" : "";
   const find = (w: Weekday, s: MainService, component: "main" | "soup") =>
     args.items.find((i) => i.weekday === w && i.service === s && i.component === component);
+  const riceLabel = (w: Weekday, s: MainService) => {
+    const item = find(w, s, "main");
+    const recipe = item?.recipe_id ? args.catalog.recipes.find((r) => r.id === item.recipe_id) : null;
+    return recipe?.rice_mode === "integrated" ? "Integrado en preparación" : "Incluido por defecto";
+  };
 
   const rows: string[][] = [];
   rows.push([`MENÚ SEMANAL · SEMANA ${args.week} · ${args.year}`]);
@@ -27,20 +32,21 @@ export function exportMenuExcel(args: ExportArgs) {
   rows.push(["SERVICIO", "COMPONENTE", ...WEEKDAYS.map((d) => d.label)]);
   rows.push(["DESAYUNO", "Plato fuerte", ...WEEKDAYS.map((d) => recipeName(find(d.value, "breakfast", "main")?.recipe_id))]);
   rows.push(["", "Proteína", ...WEEKDAYS.map((d) => proteinName(find(d.value, "breakfast", "main")?.protein_id))]);
-  rows.push(["", "Arroz", ...WEEKDAYS.map(() => "Incluido")]);
+  rows.push(["", "Arroz", ...WEEKDAYS.map((d) => riceLabel(d.value, "breakfast"))]);
   rows.push(["", "Bebida", ...WEEKDAYS.map((d) => find(d.value, "breakfast", "main")?.beverage ?? "")]);
   rows.push(["ALMUERZO", "Sopa", ...WEEKDAYS.map((d) => d.value === 6 ? "No aplica" : recipeName(find(d.value, "lunch", "soup")?.recipe_id))]);
   rows.push(["", "Plato fuerte", ...WEEKDAYS.map((d) => recipeName(find(d.value, "lunch", "main")?.recipe_id))]);
   rows.push(["", "Proteína", ...WEEKDAYS.map((d) => proteinName(find(d.value, "lunch", "main")?.protein_id))]);
-  rows.push(["", "Arroz", ...WEEKDAYS.map(() => "Incluido")]);
+  rows.push(["", "Arroz", ...WEEKDAYS.map((d) => riceLabel(d.value, "lunch"))]);
   rows.push(["", "Ensalada", ...WEEKDAYS.map((d) => recipeName(find(d.value, "lunch", "main")?.salad_recipe_id) || "Sin ensalada")]);
   rows.push(["", "Bebida", ...WEEKDAYS.map((d) => find(d.value, "lunch", "main")?.beverage ?? "")]);
   rows.push(["CENA", "Plato fuerte", ...WEEKDAYS.map((d) => recipeName(find(d.value, "dinner", "main")?.recipe_id))]);
   rows.push(["", "Proteína", ...WEEKDAYS.map((d) => proteinName(find(d.value, "dinner", "main")?.protein_id))]);
-  rows.push(["", "Arroz", ...WEEKDAYS.map(() => "Incluido")]);
+  rows.push(["", "Arroz", ...WEEKDAYS.map((d) => riceLabel(d.value, "dinner"))]);
   rows.push(["", "Ensalada", ...WEEKDAYS.map((d) => recipeName(find(d.value, "dinner", "main")?.salad_recipe_id) || "Sin ensalada")]);
   rows.push(["", "Bebida", ...WEEKDAYS.map((d) => find(d.value, "dinner", "main")?.beverage ?? "")]);
   rows.push([]);
+  rows.push(["NOTA", "Todos los servicios incluyen arroz por defecto, excepto preparaciones con arroz integrado."]);
 
   const htmlRows = rows.map((row, ri) => {
     const cells = row.map((cell) => {
@@ -70,5 +76,3 @@ function escapeHtml(value: string) {
 function safeFile(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/gi, "_").replace(/^_|_$/g, "").toLowerCase();
 }
-
-
