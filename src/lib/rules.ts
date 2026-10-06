@@ -1,4 +1,4 @@
-﻿import type { MainService, Parity, Weekday } from "./types";
+import type { MainService, Parity, Weekday } from "./types";
 
 export const RULES = {
   MAIN_SLOTS: 21,
@@ -53,6 +53,16 @@ export function cyclePosition(weekday: Weekday, arrival: Weekday): number {
   return (((weekday - arrival - 1 + 7) % 7) + 1);
 }
 
+/**
+ * Distancia mínima entre dos días dentro del ciclo semanal circular.
+ * Es la única fuente de verdad para reglas temporales que cruzan el cierre/inicio
+ * del ciclo de recepción. El mismo día tiene distancia 0 y días contiguos 1.
+ */
+export function cycleDistance(dayA: Weekday, dayB: Weekday, arrival: Weekday): number {
+  const direct = Math.abs(cyclePosition(dayA, arrival) - cyclePosition(dayB, arrival));
+  return Math.min(direct, 7 - direct);
+}
+
 export function firstUsablePosition(productArrival: Weekday, arrival: Weekday): number {
   return cyclePosition(productArrival, arrival) + 1 > 7
     ? 1
@@ -66,7 +76,3 @@ export function cycleOrder(arrival: Weekday): Weekday[] {
 }
 
 export const SUNDAY_PREFERRED_PROTEINS = ["pollo", "lomo-cerdo", "estofado-res"];
-
-
-
-

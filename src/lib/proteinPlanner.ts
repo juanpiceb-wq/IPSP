@@ -1,5 +1,5 @@
 import type { Catalog, MainService, MenuItem, Parity, Weekday } from "./types";
-import { RULES, cycleOrder } from "./rules";
+import { RULES, cycleDistance, cycleOrder } from "./rules";
 
 type EligibleSlot={weekday:number;service:string;component:string;ids:string[]};
 export type ProteinSlot={weekday:Weekday;service:MainService;proteinId:string};
@@ -42,14 +42,10 @@ export function buildExactProteinPlan(args:{catalog:Catalog;parity:Parity;arriva
 
  const adjacent=(pid:string,day:Weekday)=>{
    if(pid==="huevo") return false;
-   const p=pos.get(day)!;
    for(const [key,other] of assigned){
      if(other!==pid) continue;
-     const od=Number(key.split("|")[0]) as Weekday;
-     const otherPos=pos.get(od)??0;
-     const direct=Math.abs(otherPos-p);
-     const circular=Math.min(direct,cycle.length-direct);
-     if(circular<=RULES.MIN_PROTEIN_GAP_DAYS) return true;
+     const otherDay=Number(key.split("|")[0]) as Weekday;
+     if(cycleDistance(otherDay,day,arrival)<=RULES.MIN_PROTEIN_GAP_DAYS) return true;
    }
    return false;
  };
