@@ -2,6 +2,7 @@ import type { Catalog, MainService, MenuItem, Parity, Weekday, WeeklyMenu } from
 import { beverageLabel } from "./rules";
 import { blockingReason, buildContext, buildHistoryIndex } from "./engine/context";
 import { mainAllowsSalad, saladAllowedForMain } from "./salads";
+import { buildExactProteinPlan } from "./proteinPlanner";
 interface AiMenuInput { year:number; week:number; parity:Parity; campId:string; diners:number; arrival:Weekday; catalog:Catalog; history:WeeklyMenu[]; locked?:MenuItem[]; currentItems?:MenuItem[]; repairIssues?:string[]; eligibleBySlotOverride?:Array<{weekday:number;service:string;component:string;ids:string[]}>; }
 interface AiChoice { weekday:number; service:MainService; component:"main"|"soup"; recipe_id:string; salad_recipe_id:string|null; }
 export async function generateMenuWithAI(input:AiMenuInput):Promise<{items:MenuItem[];seed:string}>{
@@ -13,6 +14,15 @@ export async function generateMenuWithAI(input:AiMenuInput):Promise<{items:MenuI
  const ctx=buildContext(input.catalog,input.parity,input.arrival,hist);
  const eligibleBySlot:Array<{weekday:number;service:string;component:string;ids:string[]}>=input.eligibleBySlotOverride??[];
  if(!input.eligibleBySlotOverride){for(let d=0;d<7;d++){for(const s of ["breakfast","lunch","dinner"] as MainService[]){eligibleBySlot.push({weekday:d,service:s,component:"main",ids:input.catalog.recipes.filter(r=>r.active&&!!r.primary_protein_id&&!r.services.includes("salad")&&!blockingReason(r,s,d as Weekday,ctx)).map(r=>r.id)});}if(d<6)eligibleBySlot.push({weekday:d,service:"lunch",component:"soup",ids:input.catalog.recipes.filter(r=>r.active&&!blockingReason(r,"soup",d as Weekday,ctx)).map(r=>r.id)});}}
+ const proteinPlan=buildExactProteinPlan({catalog:input.catalog,parity:input.parity,arrival:input.arrival,eligibleBySlot,locked:input.locked});
+ const proteinPlanMap=new Map(proteinPlan.map(x=>[`${x.weekday}|${x.service}`,x.proteinId]));
+ for(const slot of eligibleBySlot){
+   if(slot.component!=="main")continue;
+   const planned=proteinPlanMap.get(`${slot.weekday}|${slot.service}`);
+   if(!planned)throw new Error(`No se asignó proteína a weekday=${slot.weekday}, service=${slot.service}.`);
+   slot.ids=slot.ids.filter(id=>input.catalog.recipes.find(r=>r.id===id)?.primary_protein_id===planned);
+   if(!slot.ids.length)throw new Error(`No hay preparación válida de ${planned} para weekday=${slot.weekday}, service=${slot.service}.`);
+ }
  const locked=(input.locked??[]).filter(i=>i.locked&&i.recipe_id).map(i=>({weekday:i.weekday,service:i.service,component:i.component,recipe_id:i.recipe_id,salad_recipe_id:i.salad_recipe_id}));
  const prompt=`Planifica el menú semanal IPSP usando EXCLUSIVAMENTE IDs del catálogo.
 Semana ${input.week}/${input.year}, paridad ${input.parity}, recepción weekday=${input.arrival}, comensales=${input.diners}.
@@ -32,7 +42,7 @@ REGLAS DURAS:
 - Los consumos calculados en LB/UN/SERVICIO son solo informativos y NUNCA invalidan ni condicionan la selección. La frecuencia target de cada protein/primary_protein_id debe cumplirse EXACTAMENTE: ni más ni menos.\n- Ingrediente base puede repetirse en días consecutivos UNA sola vez por semana; una segunda repetición consecutiva ya no está permitida.
 - Busca variedad y evita preparaciones recientes.
 SOPAS (PREFERENCIA BLANDA, nunca invalida): procura variedad incluyendo pata/costilla, hueso carnudo, crema, menestrón y sopa sin proteína.
-PROTEINAS=${JSON.stringify(proteins)}
+PLAN_PROTEINAS_OBLIGATORIO=${JSON.stringify(proteinPlan)}\n- El PLAN_PROTEINAS_OBLIGATORIO ya fue resuelto por el motor. NO cambies la proteína de ningún espacio; elige únicamente una preparación compatible de esa proteína.\nPROTEINAS=${JSON.stringify(proteins)}
 CATALOGO=${JSON.stringify(recipes)}
 OPCIONES_VALIDAS_POR_ESPACIO=${JSON.stringify(eligibleBySlot)}
 Para cada espacio DEBES elegir recipe_id únicamente de ids de OPCIONES_VALIDAS_POR_ESPACIO para ese weekday/service/component.
