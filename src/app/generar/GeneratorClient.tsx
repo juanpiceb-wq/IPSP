@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -73,10 +73,10 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
         if(bulkMode){
           if(!campIds.length) throw new Error("La selección no tiene campamentos activos.");
           const res=await actionGenerateBulk({year,week,campIds});
-          setItems(res.items);setIssues(res.issues);setMetrics(res.metrics);setCapacityWarning(res.capacityWarning);setSeed(res.seed);setBulkResults(res.campResults);setManualOverride(false);router.refresh();
+          setItems(res.items);setIssues(res.issues);setMetrics(res.metrics);setCapacityWarning(res.capacityWarning);setSeed(res.seed);setBulkResults(res.campResults);setManualOverride(false);
         }else if(camp){
           const res=await actionGenerate({year,week,campId:camp.id,diners:camp.diners_default,arrival:camp.reception_weekday_default,locked:keepLocked?items.filter(i=>i.locked):[]});
-          setItems(res.items);setIssues(res.issues);setMetrics(res.metrics);setCapacityWarning(res.capacityWarning);setSeed(res.seed);setBulkResults([]);setManualOverride(false);router.refresh();
+          setItems(res.items);setIssues(res.issues);setMetrics(res.metrics);setCapacityWarning(res.capacityWarning);setSeed(res.seed);setBulkResults([]);setManualOverride(false);
         }
       }catch(e){setMessage(e instanceof Error?e.message:"No se pudo generar el menú.");}
     });
@@ -210,4 +210,3 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
     </Modal>
   </div>;
 }
-
