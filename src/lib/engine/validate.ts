@@ -130,7 +130,7 @@ export function validateMenu(input: ValidateInput): ValidationResult {
   // no puede repetirse dentro de la misma semana.
   for (const it of mains) {
     if (!it.protein_id)
-      issues.push({ level: "error", rule: "proteina-obligatoria", message: `${WEEKDAYS[it.weekday].label} · ${serviceLabel(it.service)}: ${it.recipe_name} no tiene proteína estructurada asignada.`, weekday: it.weekday, service: it.service });
+      issues.push({ level: "error", rule: "proteina-obligatoria", message: `${WEEKDAYS[it.weekday].label} · ${it.service}: ${it.recipe_name} no tiene proteína estructurada asignada.`, weekday: it.weekday, service: it.service });
   }
   const exactRecipes = new Map<string, MenuItem[]>();
   for (const it of mains) {
