@@ -1,5 +1,5 @@
 import type { Catalog, MenuItem, Recipe, Weekday } from "./types";
-import { cycleOrder } from "./rules";
+import { cycleDistance, cycleOrder } from "./rules";
 
 function normalize(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
@@ -75,20 +75,14 @@ export function sauceKey(recipe: Recipe): string | null {
   return null;
 }
 
-function cycleIndex(day: Weekday, arrival: Weekday) {
-  return cycleOrder(arrival).indexOf(day);
-}
-
 export function violatesAdjacentSauce(items: MenuItem[], weekday: Weekday, recipe: Recipe, catalog: Catalog, arrival: Weekday) {
   const key = sauceKey(recipe);
   if (!key) return false;
-  const idx = cycleIndex(weekday, arrival);
   return items.some((i) => {
     if (i.component !== "main" || !i.recipe_id) return false;
     const other = catalog.recipes.find((r) => r.id === i.recipe_id);
     if (!other || sauceKey(other) !== key) return false;
-    const otherIdx = cycleIndex(i.weekday, arrival);
-    return otherIdx >= 0 && Math.abs(otherIdx - idx) <= 1;
+    return cycleDistance(i.weekday, weekday, arrival) <= 1;
   });
 }
 
@@ -103,13 +97,13 @@ export function adjacentSauceViolations(items: MenuItem[], catalog: Catalog, arr
     for (let b = a + 1; b < mains.length; b++) {
       const rb = catalog.recipes.find((r) => r.id === mains[b].recipe_id);
       if (!rb || sauceKey(rb) !== keyA) continue;
-      const ia = cycleIndex(mains[a].weekday, arrival);
-      const ib = cycleIndex(mains[b].weekday, arrival);
-      if (ia < 0 || ib < 0 || Math.abs(ia - ib) > 1) continue;
-      const sig = [keyA, Math.min(ia, ib), Math.max(ia, ib)].join("|");
+      if (cycleDistance(mains[a].weekday, mains[b].weekday, arrival) > 1) continue;
+      const dayA = mains[a].weekday;
+      const dayB = mains[b].weekday;
+      const sig = [keyA, Math.min(dayA, dayB), Math.max(dayA, dayB)].join("|");
       if (seen.has(sig)) continue;
       seen.add(sig);
-      out.push({ label: `Salsa de ${keyA}`, dayA: mains[a].weekday, dayB: mains[b].weekday });
+      out.push({ label: `Salsa de ${keyA}`, dayA, dayB });
     }
   }
   return out;
