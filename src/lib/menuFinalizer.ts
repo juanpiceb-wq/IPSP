@@ -1,5 +1,5 @@
 import type { Catalog, MainService, MenuItem, Parity, Recipe, Weekday } from "./types";
-import { beverageLabel, cycleOrder, RULES } from "./rules";
+import { beverageLabel, cycleDistance, cycleOrder, RULES } from "./rules";
 import { isMeaningfulBase } from "./engine/context";
 import { sauceKey, soupNeedScore } from "./recipeRules";
 import { mainAllowsSalad, saladAllowedForMain } from "./salads";
@@ -49,7 +49,6 @@ function solveMains(
 
   const selected=new Map<string,Recipe>();
   const used=new Set<string>();
-  const cycle=cycleOrder(arrival); const cyclePos=new Map(cycle.map((d,i)=>[d,i]));
 
   const canUse=(slot:typeof slots[number],r:Recipe)=>{
     if(used.has(r.id))return false;
@@ -58,18 +57,14 @@ function solveMains(
     if(difficulty>RULES.MAX_DAILY_DIFFICULTY)return false;
     const sKey=sauceKey(r);
     if(sKey){
-      const pos=cyclePos.get(slot.weekday)??0;
       for(const [key,other] of selected){
         if(sauceKey(other)!==sKey)continue;
         const otherDay=Number(key.split("|")[0]) as Weekday;
-        const otherPos=cyclePos.get(otherDay)??0;
-        const direct=Math.abs(otherPos-pos);
-        const circular=Math.min(direct,cycle.length-direct);
-        if(circular<=1)return false;
+        if(cycleDistance(otherDay,slot.weekday,arrival)<=1)return false;
       }
     }
     const trial=[...selected.entries(),[slot.key,r] as [string,Recipe]];
-    if(baseAdjacencyCount(trial,cycle)>1)return false;
+    if(baseAdjacencyCount(trial,arrival)>1)return false;
     return true;
   };
   const score=(slot:typeof slots[number],r:Recipe)=>{
@@ -111,20 +106,15 @@ function solveSoups(
     return{key,weekday:Number(key.split("|")[0]) as Weekday,recipes};
   }).sort((a,b)=>a.recipes.length-b.recipes.length);
   const selected=new Map<string,Recipe>();const used=new Set<string>(usedMain);const counts=new Map<string,number>();
-  const cycle=cycleOrder(arrival);const pos=new Map(cycle.map((d,i)=>[d,i]));
   const canUse=(slot:typeof slots[number],r:Recipe)=>{
     if(used.has(r.id))return false;
     const pid=r.primary_protein_id;
     if(pid&&soupTargets.has(pid)&&(counts.get(pid)??0)>=(soupTargets.get(pid)??0))return false;
     if(pid){
-      const current=pos.get(slot.weekday)??0;
       for(const [key,other] of selected){
         if(other.primary_protein_id!==pid)continue;
         const otherDay=Number(key.split("|")[0]) as Weekday;
-        const otherPos=pos.get(otherDay)??0;
-        const direct=Math.abs(otherPos-current);
-        const circular=Math.min(direct,cycle.length-direct);
-        if(circular<=RULES.MIN_PROTEIN_GAP_DAYS)return false;
+        if(cycleDistance(otherDay,slot.weekday,arrival)<=RULES.MIN_PROTEIN_GAP_DAYS)return false;
       }
     }
     return true;
@@ -188,9 +178,11 @@ function assertCanonical(items:MenuItem[],catalog:Catalog,plan:ProteinSlot[]){
   }
 }
 
-function baseAdjacencyCount(entries:[string,Recipe][],cycle:Weekday[]){
-  let count=0;for(let i=0;i<cycle.length;i++){
-    const leftDay=cycle[i],rightDay=cycle[(i+1)%cycle.length];
+function baseAdjacencyCount(entries:[string,Recipe][],arrival:Weekday){
+  const cycle=cycleOrder(arrival);let count=0;
+  for(let i=0;i<cycle.length;i++)for(let j=i+1;j<cycle.length;j++){
+    const leftDay=cycle[i],rightDay=cycle[j];
+    if(cycleDistance(leftDay,rightDay,arrival)!==1)continue;
     const left=new Set(entries.filter(([k])=>Number(k.split("|")[0])===leftDay).map(([,r])=>r.base_ingredient).filter((b):b is string=>isMeaningfulBase(b)));
     const right=new Set(entries.filter(([k])=>Number(k.split("|")[0])===rightDay).map(([,r])=>r.base_ingredient).filter((b):b is string=>isMeaningfulBase(b)));
     for(const b of left)if(right.has(b))count++;
