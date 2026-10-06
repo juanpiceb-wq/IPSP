@@ -49,7 +49,7 @@ export interface Protein {
   breakfast_only: boolean;
   soup_only: boolean;
   parity: ProductParity;
-  /** MÁXIMO semanal, nunca una cuota obligatoria. */
+  /** Frecuencia semanal exacta para la paridad aplicable. */
   target_frequency: number;
   portion_type: PortionType;
   portion_value: number | null;
@@ -81,12 +81,8 @@ export interface Recipe {
   active: boolean;
   source: string;
   notes?: string | null;
-  /** Ingredientes principales revisados en el maestro; no implican por sí solos un tope duro semanal. */
   main_ingredients?: string[];
-  /** Compatibilidad de ensalada definida por plato. */
   salad_policy?: string | null;
-
-  /** Campos operativos del maestro v2. Opcionales para mantener compatibilidad con ensaladas históricas. */
   base_ingredient?: string | null;
   difficulty?: Difficulty;
   cooking_method?: string | null;
@@ -102,32 +98,14 @@ export interface Recipe {
   only_weekday?: Weekday | null;
 }
 
-export interface Zone {
-  id: string;
-  name: string;
-  notes?: string | null;
-  active: boolean;
-}
-
+export interface Zone { id:string; name:string; notes?:string|null; active:boolean; }
 export interface Camp {
-  id: string;
-  name: string;
-  diners_default: number;
-  reception_weekday_default: Weekday;
-  /** Texto libre: horarios, segundo despacho, muelle, observaciones de recepción, etc. */
-  delivery_notes?: string | null;
-  notes?: string | null;
-  zone_id?: string | null;
-  active: boolean;
+  id:string; name:string; diners_default:number; reception_weekday_default:Weekday;
+  delivery_notes?:string|null; notes?:string|null; zone_id?:string|null; active:boolean;
 }
 
 export type MenuStatus = "borrador" | "aprobado" | "utilizado";
-export const STATUS_LABEL: Record<MenuStatus, string> = {
-  borrador: "Borrador",
-  aprobado: "Aprobado",
-  utilizado: "Utilizado",
-};
-
+export const STATUS_LABEL: Record<MenuStatus,string> = { borrador:"Borrador", aprobado:"Aprobado", utilizado:"Utilizado" };
 export type Component = "main" | "soup";
 export type ExecutionStatus = "pending" | "complies" | "not_complies" | "as_planned" | "replaced";
 
@@ -136,12 +114,15 @@ export interface MenuItem {
   service: MainService;
   component: Component;
   recipe_id: string | null;
+  /** Metadato transitorio para renderizar de inmediato aunque el catálogo cliente esté desfasado. */
+  recipe_name?: string | null;
   protein_id: string | null;
   salad_recipe_id: string | null;
+  /** Metadato transitorio; no se persiste en menu_items. */
+  salad_recipe_name?: string | null;
   beverage: string | null;
   locked: boolean;
   reasons: string[];
-  /** Seguimiento real para KPI de cumplimiento. */
   execution_status?: ExecutionStatus;
   replacement_name?: string | null;
   salad_execution_status?: ExecutionStatus;
@@ -149,72 +130,18 @@ export interface MenuItem {
 }
 
 export interface WeeklyMenu {
-  id: string;
-  year: number;
-  week_number: number;
-  parity: Parity;
-  camp_id: string;
-  diners: number;
-  supply_arrival_weekday: Weekday;
-  actual_start_date: string | null;
-  actual_end_date: string | null;
-  status: MenuStatus;
-  validation_score: number;
-  variety_score: number;
-  seed: string | null;
-  notes: string | null;
-  created_at: string;
-  /** Días que este menú fue desplazado respecto al menú base compartido. */
-  schedule_shift_days?: number;
-  items: MenuItem[];
+  id:string; year:number; week_number:number; parity:Parity; camp_id:string; diners:number;
+  supply_arrival_weekday:Weekday; actual_start_date:string|null; actual_end_date:string|null;
+  status:MenuStatus; validation_score:number; variety_score:number; seed:string|null; notes:string|null;
+  created_at:string; schedule_shift_days?:number; items:MenuItem[];
 }
 
-export interface MasterIngredient {
-  id: string;
-  name: string;
-  group: string;
-  restrictive: boolean;
-  availability: ProductParity;
-  use_in_menu: boolean;
-  note: string | null;
-}
-
-export interface Catalog {
-  proteins: Protein[];
-  products: RestrictiveProduct[];
-  recipes: Recipe[];
-  camps: Camp[];
-  zones: Zone[];
-  ingredients: MasterIngredient[];
-}
-
+export interface MasterIngredient { id:string; name:string; group:string; restrictive:boolean; availability:ProductParity; use_in_menu:boolean; note:string|null; }
+export interface Catalog { proteins:Protein[]; products:RestrictiveProduct[]; recipes:Recipe[]; camps:Camp[]; zones:Zone[]; ingredients:MasterIngredient[]; }
 export type IssueLevel = "ok" | "warn" | "error";
-export interface ValidationIssue {
-  level: IssueLevel;
-  rule: string;
-  message: string;
-  weekday?: Weekday;
-  service?: MainService;
-}
-
+export interface ValidationIssue { level:IssueLevel; rule:string; message:string; weekday?:Weekday; service?:MainService; }
 export interface MenuMetrics {
-  mainCount: number;
-  soupCount: number;
-  saladCount: number;
-  saladTarget: number;
-  errors: number;
-  warnings: number;
-  varietyScore: number;
-  complianceScore: number;
-  porkExceptions: number;
-  maxDailyDifficulty?: number;
-  inventoryUsePct?: number;
+  mainCount:number; soupCount:number; saladCount:number; saladTarget:number; errors:number; warnings:number;
+  varietyScore:number; complianceScore:number; porkExceptions:number; maxDailyDifficulty?:number; inventoryUsePct?:number;
 }
-
-export interface SupplyLimit {
-  key: string;
-  label: string;
-  quantity_per_person: number;
-  unit: string;
-  notes?: string | null;
-}
+export interface SupplyLimit { key:string; label:string; quantity_per_person:number; unit:string; notes?:string|null; }
