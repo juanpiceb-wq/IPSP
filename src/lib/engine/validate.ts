@@ -228,9 +228,11 @@ export function validateMenu(input: ValidateInput): ValidationResult {
   if (maxDailyDifficulty <= RULES.MAX_DAILY_DIFFICULTY)
     issues.push({ level: "ok", rule: "dificultad-dia", message: `Carga de cocina controlada: ningún día supera dificultad ${RULES.MAX_DAILY_DIFFICULTY}.` });
 
-  // Ingrediente base no consecutivo según el ciclo real de abastecimiento.
+  // Ingrediente base: se tolera UNA repetición entre días consecutivos por semana.
+  // A partir de la segunda coincidencia consecutiva, sí es incumplimiento.
   let baseRepeats = 0;
   const baseOrder = cycleOrder(input.arrival);
+  const basePairs: { leftDay: Weekday; rightDay: Weekday; base: string }[] = [];
   for (let pos = 0; pos < baseOrder.length - 1; pos++) {
     const leftDay = baseOrder[pos];
     const rightDay = baseOrder[pos + 1];
@@ -240,12 +242,13 @@ export function validateMenu(input: ValidateInput): ValidationResult {
     const right = new Set(mains.filter((i) => i.weekday === rightDay && i.recipe_id)
       .map((i) => ctx.recipesById.get(i.recipe_id!)?.base_ingredient)
       .filter((b): b is string => isMeaningfulBase(b)));
-    for (const b of left) if (right.has(b)) {
-      baseRepeats++;
-      issues.push({ level: "error", rule: "base-consecutiva", message: `${WEEKDAYS[leftDay].label} → ${WEEKDAYS[rightDay].label}: se repite el ingrediente base ${b}.` });
-    }
+    for (const base of left) if (right.has(base)) basePairs.push({ leftDay, rightDay, base });
   }
-  if (!baseRepeats) issues.push({ level: "ok", rule: "base-consecutiva", message: "No se repiten ingredientes base dominantes en días consecutivos." });
+  baseRepeats = basePairs.length;
+  for (const x of basePairs.slice(1))
+    issues.push({ level: "error", rule: "base-consecutiva", message: `${WEEKDAYS[x.leftDay].label} → ${WEEKDAYS[x.rightDay].label}: se repite el ingrediente base ${x.base}; ya se utilizó la única excepción semanal de base consecutiva.` });
+  if (baseRepeats === 0) issues.push({ level: "ok", rule: "base-consecutiva", message: "No se repiten ingredientes base dominantes en días consecutivos." });
+  else if (baseRepeats === 1) issues.push({ level: "ok", rule: "base-consecutiva", message: `Se utiliza 1/1 excepción semanal de ingrediente base en días consecutivos (${basePairs[0].base}).` });
 
   // Ensaladas: mínimo operativo flexible de 5/14 servicios.
   // Solo se asignan cuando el plato fuerte admite ensalada y la combinación es compatible.
@@ -311,12 +314,12 @@ export function validateMenu(input: ValidateInput): ValidationResult {
   for (const p of catalog.proteins) {
     if (!p.active || p.target_frequency <= 0 || (p.parity !== "todas" && p.parity !== parity)) continue;
     const assigned = uses.get(p.id) ?? 0;
-    if (assigned > p.target_frequency) {
+    if (assigned !== p.target_frequency) {
       frequencyOverages++;
-      issues.push({ level: "error", rule: "frecuencia", message: `${p.name}: máximo ${p.target_frequency} por semana · asignadas ${assigned}.` });
+      issues.push({ level: "error", rule: "frecuencia", message: `${p.name}: debe aparecer exactamente ${p.target_frequency} vez/veces por semana · asignadas ${assigned}.` });
     }
   }
-  if (!frequencyOverages) issues.push({ level: "ok", rule: "frecuencia", message: "Todas las proteínas respetan su máximo semanal configurado." });
+  if (!frequencyOverages) issues.push({ level: "ok", rule: "frecuencia", message: "Todas las proteínas cumplen exactamente su frecuencia semanal configurada." });
 
   // Consumo/stock es informativo y NO participa del cumplimiento del menú.
   // Los límites duros de abastecimiento son exclusivamente los máximos semanales
