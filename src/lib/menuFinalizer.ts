@@ -15,6 +15,7 @@ export type RecipePreference={weekday:number;service:MainService;component:"main
 export function finalizeMenu(args:{
   catalog:Catalog; parity:Parity; arrival:Weekday; eligibleBySlot:EligibleSlot[];
   proteinPlan:ProteinSlot[]; preferences?:RecipePreference[]; locked?:MenuItem[];
+  recencyPenalty?:Record<string,number>;
 }):MenuItem[]{
   const recipeById=new Map(args.catalog.recipes.map(r=>[r.id,r]));
   const allowedBySlot=new Map(args.eligibleBySlot.map(s=>[slotKey(s.weekday as Weekday,s.service as MainService,s.component as "main"|"soup"),[...s.ids]]));
@@ -24,9 +25,10 @@ export function finalizeMenu(args:{
     if(!preferred.has(key))preferred.set(key,p.recipe_id);
   }
   const locked=new Map((args.locked??[]).filter(x=>x.locked&&x.recipe_id).map(x=>[slotKey(x.weekday,x.service,x.component),x]));
+  const recencyPenalty=args.recencyPenalty??{};
 
-  const mains=solveMains(args.catalog,args.arrival,args.parity,args.proteinPlan,allowedBySlot,preferred,locked,recipeById);
-  const soups=solveSoups(args.catalog,args.arrival,args.parity,allowedBySlot,preferred,locked,recipeById,new Set(mains.map(x=>x.recipe_id!).filter(Boolean)));
+  const mains=solveMains(args.catalog,args.arrival,args.parity,args.proteinPlan,allowedBySlot,preferred,locked,recipeById,recencyPenalty);
+  const soups=solveSoups(args.catalog,args.arrival,args.parity,allowedBySlot,preferred,locked,recipeById,new Set(mains.map(x=>x.recipe_id!).filter(Boolean)),recencyPenalty);
   const items=[...mains,...soups];
   assignSalads(items,args.catalog,args.parity,preferred,locked,recipeById);
   items.sort((a,b)=>a.weekday-b.weekday||serviceOrder(a.service)-serviceOrder(b.service)||(a.component==="soup"?-1:1));
@@ -36,7 +38,7 @@ export function finalizeMenu(args:{
 
 function solveMains(
   catalog:Catalog,arrival:Weekday,parity:Parity,plan:ProteinSlot[],allowedBySlot:Map<string,string[]>,
-  preferred:Map<string,string>,locked:Map<string,MenuItem>,recipeById:Map<string,Recipe>
+  preferred:Map<string,string>,locked:Map<string,MenuItem>,recipeById:Map<string,Recipe>,recencyPenalty:Record<string,number>
 ){
   const slots=plan.map(p=>{
     const key=slotKey(p.weekday,p.service,"main");
@@ -69,7 +71,12 @@ function solveMains(
   };
   const score=(slot:typeof slots[number],r:Recipe)=>{
     let n=0;
-    if(preferred.get(slot.key)===r.id)n+=10000;
+    if(preferred.get(slot.key)===r.id)n+=1000;
+    n-=recencyPenalty[r.id]??0;
+    if(isChaulafan(r)){
+      const previousArrival=((arrival+6)%7) as Weekday;
+      n+=(slot.weekday===arrival||slot.weekday===previousArrival)?700:-300;
+    }
     n-=(r.difficulty??1)*20;
     return n;
   };
@@ -95,7 +102,7 @@ function solveMains(
 
 function solveSoups(
   catalog:Catalog,arrival:Weekday,parity:Parity,allowedBySlot:Map<string,string[]>,preferred:Map<string,string>,
-  locked:Map<string,MenuItem>,recipeById:Map<string,Recipe>,usedMain:Set<string>
+  locked:Map<string,MenuItem>,recipeById:Map<string,Recipe>,usedMain:Set<string>,recencyPenalty:Record<string,number>
 ){
   const soupTargets=new Map(catalog.proteins.filter(p=>p.active&&p.soup_only&&p.target_frequency>0&&(p.parity==="todas"||p.parity===parity)).map(p=>[p.id,p.target_frequency]));
   const keys=[0,1,2,3,4,5].map(d=>slotKey(d as Weekday,"lunch","soup"));
@@ -129,7 +136,8 @@ function solveSoups(
     return true;
   };
   const score=(slot:typeof slots[number],r:Recipe)=>{
-    let n=0;if(preferred.get(slot.key)===r.id)n+=10000;
+    let n=0;if(preferred.get(slot.key)===r.id)n+=1000;
+    n-=recencyPenalty[r.id]??0;
     n+=soupNeedScore([...selected.entries()].map(([key,rr])=>makeItem(Number(key.split("|")[0]) as Weekday,"lunch","soup",rr,parity,null,false,"")),r,catalog);
     if(!r.primary_protein_id)n+=20;
     return n;
@@ -188,6 +196,7 @@ function baseAdjacencyCount(entries:[string,Recipe][],arrival:Weekday){
     for(const b of left)if(right.has(b))count++;
   }return count;
 }
+function isChaulafan(r:Recipe){return `${r.id} ${r.name}`.toLocaleLowerCase("es").includes("chaulaf");}
 function makeItem(weekday:Weekday,service:MainService,component:"main"|"soup",r:Recipe,parity:Parity,saladId:string|null,locked:boolean,reason:string):MenuItem{
   return{weekday,service,component,recipe_id:r.id,recipe_name:r.name,protein_id:r.primary_protein_id,salad_recipe_id:saladId,salad_recipe_name:null,beverage:component==="main"?beverageLabel(service,parity):null,locked,reasons:[reason],execution_status:"pending",replacement_name:null};
 }
