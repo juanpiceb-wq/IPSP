@@ -58,7 +58,7 @@ export function validateMenu(input: ValidateInput): ValidationResult {
   if (soupMix.menestron < 1) soupMixProblems.push("1 menestrón");
   if (soupMix.sinProteina < 1) soupMixProblems.push("1 sopa sin proteína animal");
   issues.push(soupMixProblems.length
-    ? { level: "error", rule: "composicion-sopas", message: `Composición semanal de sopas incompleta: falta ${soupMixProblems.join(", ")}.` }
+    ? { level: "warn", rule: "composicion-sopas", message: `Composición semanal de sopas incompleta: falta ${soupMixProblems.join(", ")}.` }
     : { level: "ok", rule: "composicion-sopas", message: "Sopas: mínimos de pata/costilla, hueso, crema, menestrón y sin proteína cumplidos." });
 
   let invalid = 0;
@@ -173,6 +173,7 @@ export function validateMenu(input: ValidateInput): ValidationResult {
     byProtein.set(it.protein_id, set);
   }
   for (const [proteinId, daySet] of byProtein) {
+    if (proteinId === "huevo") continue;
     const days = [...daySet].sort((a, b) => (cyclePos.get(a) ?? 0) - (cyclePos.get(b) ?? 0));
     for (let i = 1; i < days.length; i++) {
       const prev = days[i - 1];
@@ -314,21 +315,16 @@ export function validateMenu(input: ValidateInput): ValidationResult {
   }
   if (!frequencyOverages) issues.push({ level: "ok", rule: "frecuencia", message: "Todas las proteínas respetan su máximo semanal configurado." });
 
-  // Stock semanal conocido. Solo compara unidades compatibles del maestro.
+  // Consumo/stock es informativo y NO participa del cumplimiento del menú.
+  // Los límites duros de abastecimiento son exclusivamente los máximos semanales
+  // configurados por proteína (target_frequency).
   const ledger = new Map<string, number>();
   for (const it of items) {
     if (!it.recipe_id) continue;
     const r = ctx.recipesById.get(it.recipe_id);
     if (r) addConsumption(ledger, r, input.diners);
   }
-  let stockErrors = 0;
-  for (const row of inventorySummary(ledger, input.diners)) {
-    if (isHardStockKey(row.key) && row.used > row.cap + 1e-9) {
-      stockErrors++;
-      issues.push({ level: "warn", rule: "stock", message: `${row.label}: consumo ${round(row.used)} ${row.unit} > disponible ${round(row.cap)} ${row.unit}.` });
-    }
-  }
-  if (!stockErrors) issues.push({ level: "ok", rule: "stock", message: "Consumos estimados dentro de las referencias semanales del cuadro de víveres." });
+  issues.push({ level: "ok", rule: "stock", message: "El consumo estimado no invalida el menú; se controlan los máximos semanales por proteína." });
 
   const menuComplete = missingMainSlots.length === 0 && missingSoups.length === 0 && !sundaySoup;
   const variety = menuComplete ? varietyScore(items, ctx.history, ctx.recipesById) : 0;
