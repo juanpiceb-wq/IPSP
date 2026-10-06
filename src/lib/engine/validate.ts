@@ -130,7 +130,7 @@ export function validateMenu(input: ValidateInput): ValidationResult {
   // no puede repetirse dentro de la misma semana.
   for (const it of mains) {
     if (!it.protein_id)
-      issues.push({ level: "error", rule: "proteina-obligatoria", message: `${WEEKDAYS[it.weekday].label} · ${it.service}: ${it.recipe_name} no tiene proteína estructurada asignada.`, weekday: it.weekday, service: it.service });
+      issues.push({ level: "error", rule: "proteina-obligatoria", message: `${WEEKDAYS[it.weekday].label} · ${it.service}: ${ctx.recipesById.get(it.recipe_id ?? "")?.name ?? it.recipe_id ?? "Preparación"} no tiene proteína estructurada asignada.`, weekday: it.weekday, service: it.service });
   }
   const exactRecipes = new Map<string, MenuItem[]>();
   for (const it of mains) {
@@ -141,7 +141,7 @@ export function validateMenu(input: ValidateInput): ValidationResult {
   }
   for (const arr of exactRecipes.values()) {
     if (arr.length > 1)
-      issues.push({ level: "error", rule: "plato-exacto-repetido", message: `${arr[0].recipe_name} se repite ${arr.length} veces en la semana. Una preparación exacta solo puede aparecer una vez.` });
+      issues.push({ level: "error", rule: "plato-exacto-repetido", message: `${ctx.recipesById.get(arr[0].recipe_id ?? "")?.name ?? arr[0].recipe_id ?? "Preparación"} se repite ${arr.length} veces en la semana. Una preparación exacta solo puede aparecer una vez.` });
   }
 
   // Proteína repetida el mismo día.
