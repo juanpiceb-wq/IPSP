@@ -62,7 +62,10 @@ function solveMains(
       for(const [key,other] of selected){
         if(sauceKey(other)!==sKey)continue;
         const otherDay=Number(key.split("|")[0]) as Weekday;
-        if(Math.abs((cyclePos.get(otherDay)??0)-pos)<=1)return false;
+        const otherPos=cyclePos.get(otherDay)??0;
+        const direct=Math.abs(otherPos-pos);
+        const circular=Math.min(direct,cycle.length-direct);
+        if(circular<=1)return false;
       }
     }
     const trial=[...selected.entries(),[slot.key,r] as [string,Recipe]];
@@ -118,7 +121,10 @@ function solveSoups(
       for(const [key,other] of selected){
         if(other.primary_protein_id!==pid)continue;
         const otherDay=Number(key.split("|")[0]) as Weekday;
-        if(Math.abs((pos.get(otherDay)??0)-current)<=RULES.MIN_PROTEIN_GAP_DAYS)return false;
+        const otherPos=pos.get(otherDay)??0;
+        const direct=Math.abs(otherPos-current);
+        const circular=Math.min(direct,cycle.length-direct);
+        if(circular<=RULES.MIN_PROTEIN_GAP_DAYS)return false;
       }
     }
     return true;
@@ -183,9 +189,10 @@ function assertCanonical(items:MenuItem[],catalog:Catalog,plan:ProteinSlot[]){
 }
 
 function baseAdjacencyCount(entries:[string,Recipe][],cycle:Weekday[]){
-  let count=0;for(let i=0;i<cycle.length-1;i++){
-    const left=new Set(entries.filter(([k])=>Number(k.split("|")[0])===cycle[i]).map(([,r])=>r.base_ingredient).filter((b):b is string=>isMeaningfulBase(b)));
-    const right=new Set(entries.filter(([k])=>Number(k.split("|")[0])===cycle[i+1]).map(([,r])=>r.base_ingredient).filter((b):b is string=>isMeaningfulBase(b)));
+  let count=0;for(let i=0;i<cycle.length;i++){
+    const leftDay=cycle[i],rightDay=cycle[(i+1)%cycle.length];
+    const left=new Set(entries.filter(([k])=>Number(k.split("|")[0])===leftDay).map(([,r])=>r.base_ingredient).filter((b):b is string=>isMeaningfulBase(b)));
+    const right=new Set(entries.filter(([k])=>Number(k.split("|")[0])===rightDay).map(([,r])=>r.base_ingredient).filter((b):b is string=>isMeaningfulBase(b)));
     for(const b of left)if(right.has(b))count++;
   }return count;
 }
