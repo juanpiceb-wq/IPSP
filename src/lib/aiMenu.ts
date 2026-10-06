@@ -21,13 +21,13 @@ REGLAS DURAS:
 - Exactamente 6 sopas: lunch weekdays 0..5. Domingo no lleva sopa.
 - Domingo lunch usa la receta fija del catálogo; domingo dinner una receta sunday_roast.
 - Respeta services, fixed/only weekday, paridad, breakfast_only y soup_only.
-- No repetir receta ni FAMILIA de plato en toda la semana: por ejemplo bistec de res + bistec de cerdo, dos empanadas, dos ceviches o dos chaulafanes cuentan como familia repetida.\n- Misma proteína no se repite el mismo día y debe existir al menos 1 día completo de por medio antes de volver a usarla.
+- No repetir receta ni FAMILIA de plato en toda la semana: por ejemplo bistec de res + bistec de cerdo, dos empanadas, dos ceviches o dos chaulafanes cuentan como familia repetida.\n- Para TODA regla de proteína usa EXCLUSIVAMENTE el campo protein/primary_protein_id del catálogo. NUNCA deduzcas proteína por el nombre del plato.\n- Misma proteína (según ese campo estructurado) no se repite el mismo día y debe existir al menos 1 día completo de por medio antes de volver a usarla.
 - Los máximos semanales de proteínas son límites DUROS, no cuotas. Cerdo total máximo 8 servicios: fritada máximo 3, chuleta máximo 2, cuero máximo 2 y lomo de cerdo máximo 1.
 - Chorizo es neutro para origen animal. Solo una excepción semanal de origen cerdo repetido en un día; otros orígenes no se repiten el mismo día.
 - Pollo aparece el primer día posterior a recepción.
 - El ciclo se cuenta desde el primer día posterior a recepción. Verde SOLO en los primeros 4 días del ciclo; maduro SOLO desde el día 5. Respeta además la paridad/disponibilidad de bases como mote, sardina, garbanzo y demás restricciones del catálogo.\n- No repetir ingrediente base dominante en días consecutivos del ciclo.\n- No repetir la misma salsa en el mismo día ni en días consecutivos.\n- La suma de dificultad de los 3 platos fuertes de un día no puede superar 6.
 - Conserva BLOQUEADOS exactamente.
-- Asigna al menos 5 ensaladas compatibles en almuerzos/cenas, usando recetas service=salad.
+- Asigna al menos 5 ensaladas compatibles en almuerzos/cenas, usando recetas service=salad. Como preferencia BLANDA, repártelas entre la mayor cantidad razonable de días y evita concentrar dos ensaladas en un día si puedes colocarlas en días distintos compatibles.
 - Tomate, cebolla, pimiento, vegetales de refrito, condimentos y vegetales secundarios son disponibilidad SUAVE: nunca deben impedir un plato.
 - Proteínas y bases estructurales (verde, maduro, papa, queso y equivalentes principales) sí son importantes.
 - Busca variedad y evita preparaciones recientes.
