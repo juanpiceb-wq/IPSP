@@ -47,7 +47,7 @@ export class SupabaseRepo implements Repo {
   }
 
   async setMenuStatus(id:string,status:MenuStatus){const {error}=await this.db.from("weekly_menus").update({status}).eq("id",id);throwIf(error);}
-  async deleteMenu(id:string){const {error:e1}=await this.db.from("menu_items").delete().eq("weekly_menu_id",id);throwIf(e1);const {error}=await this.db.from("weekly_menus").delete().eq("id",id);throwIf(error);}
+  async deleteMenu(id:string){const {error}=await this.db.from("weekly_menus").delete().eq("id",id);throwIf(error);}
 
   async upsertRecipe(recipe:Recipe){
     const {services,restrictive_product_ids,...head}=recipe;const {error}=await this.db.from("recipes").upsert(head);throwIf(error);
