@@ -6,17 +6,17 @@ import MenuTable,{type CellRef} from "@/components/MenuTable";
 import ExecutionMenuTable,{type ExecutionRef} from "@/components/ExecutionMenuTable";
 import Modal from "@/components/Modal";
 import RecipePicker from "@/components/RecipePicker";
-import { actionDeleteMenu,actionSaveMenu,actionSetExecutionItem,actionSetStatus,actionValidate } from "@/app/actions";
+import { actionDeleteMenu,actionSaveMenu,actionSetExecutionItem,actionValidate } from "@/app/actions";
 import { exportMenuPdf } from "@/lib/exportMenuPdf";
 import { exportMenuExcel } from "@/lib/exportMenuExcel";
-import { formatDate } from "@/lib/dates";
+import { formatDate, hasDateStarted } from "@/lib/dates";
 import { WEEKDAYS } from "@/lib/types";
 import type { Catalog,ExecutionStatus,MenuItem,MenuMetrics,MenuStatus,ValidationIssue,WeeklyMenu } from "@/lib/types";
 
 export default function MenuDetailClient({menu,catalog,lastUsed,initialIssues,initialMetrics,generalAdmin,canRecord}:{menu:WeeklyMenu;catalog:Catalog;lastUsed:Record<string,string>;initialIssues:ValidationIssue[];initialMetrics:MenuMetrics;generalAdmin:boolean;canRecord:boolean}){
   const router=useRouter();const [,startTransition]=useTransition();
   const [items,setItems]=useState(menu.items);const [issues,setIssues]=useState(initialIssues);const [metrics,setMetrics]=useState(initialMetrics);const [status,setStatus]=useState<MenuStatus>(menu.status);const [cell,setCell]=useState<CellRef|null>(null);const [execRef,setExecRef]=useState<ExecutionRef|null>(null);const [busy,setBusy]=useState(false);const [message,setMessage]=useState<string|null>(null);const [executionView,setExecutionView]=useState(false);
-  const today=new Date().toISOString().slice(0,10);const started=!!menu.actual_start_date&&today>=menu.actual_start_date;
+  const started=hasDateStarted(menu.actual_start_date);
   const usedRecipeIds=useMemo(()=>items.flatMap(i=>[i.recipe_id,i.salad_recipe_id].filter(Boolean) as string[]),[items]);
   const proteinUseCounts=useMemo(()=>{const x:Record<string,number>={};items.forEach(i=>{if(i.protein_id)x[i.protein_id]=(x[i.protein_id]??0)+1});return x;},[items]);
 
