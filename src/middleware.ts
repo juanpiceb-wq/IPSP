@@ -4,7 +4,16 @@ import { createClient } from "@supabase/supabase-js";
 const ACCESS_COOKIE="ipsp_access_token";
 const REFRESH_COOKIE="ipsp_refresh_token";
 
-function client(){const url=process.env.NEXT_PUBLIC_SUPABASE_URL;const key=process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;if(!url||!key)return null;return createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}});}
+type AuthClient={auth:{
+  getUser:(jwt:string)=>Promise<{data:{user:unknown|null}}>;
+  refreshSession:(session:{refresh_token:string})=>Promise<{data:{session:{access_token:string;refresh_token:string;expires_in:number}|null};error:unknown}>;
+}};
+
+function client():AuthClient|null{
+  const url=process.env.NEXT_PUBLIC_SUPABASE_URL;const key=process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if(!url||!key)return null;
+  return createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}}) as unknown as AuthClient;
+}
 
 export async function middleware(req:NextRequest){
   const pathname=req.nextUrl.pathname;
@@ -32,15 +41,13 @@ export async function middleware(req:NextRequest){
   return NextResponse.redirect(new URL("/login",req.url));
 }
 
-async function accessIsValid(token:string,db:ReturnType<typeof createClient>){
+async function accessIsValid(token:string,db:AuthClient){
   const local=await verifyHs256Jwt(token);
   if(local!==null)return local;
-  // Compatibilidad si Supabase cambia el algoritmo de firma: validar contra Auth.
   const {data}=await db.auth.getUser(token);
   return !!data.user;
 }
 
-/** Verificación local evita una llamada remota en cada Server Action y no acepta cookies falsas. */
 async function verifyHs256Jwt(token:string):Promise<boolean|null>{
   const secret=process.env.SUPABASE_JWT_SECRET;if(!secret)return null;
   try{
