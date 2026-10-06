@@ -41,7 +41,6 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
   const [saving,setSaving] = useState(false);
   const [message,setMessage] = useState<string|null>(null);
   const [bulkResults,setBulkResults] = useState<BulkCampResult[]>([]);
-  const [manualOverride,setManualOverride] = useState(false);
 
   const parity = parityOfWeek(week);
   const activeCamps = catalog.camps.filter(c=>c.active);
@@ -61,7 +60,6 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
   const bulkLabel = scope === "camps" ? selectedMultiCamps.map(c=>c.name).join(" + ") : selectedZones.map(z=>z.name).join(" + ");
 
   const usedRecipeIds = useMemo(()=>items.flatMap(i=>[i.recipe_id,i.salad_recipe_id].filter(Boolean) as string[]),[items]);
-  const proteinUseCounts = useMemo(()=>{const x:Record<string,number>={};items.forEach(i=>{if(i.protein_id)x[i.protein_id]=(x[i.protein_id]??0)+1});return x;},[items]);
 
   function generate(keepLocked:boolean){
     setMessage(null);
@@ -73,10 +71,10 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
         if(bulkMode){
           if(!campIds.length) throw new Error("La selección no tiene campamentos activos.");
           const res=await actionGenerateBulk({year,week,campIds});
-          setItems(res.items);setIssues(res.issues);setMetrics(res.metrics);setCapacityWarning(res.capacityWarning);setSeed(res.seed);setBulkResults(res.campResults);setManualOverride(false);
+          setItems(res.items);setIssues(res.issues);setMetrics(res.metrics);setCapacityWarning(res.capacityWarning);setSeed(res.seed);setBulkResults(res.campResults);
         }else if(camp){
           const res=await actionGenerate({year,week,campId:camp.id,diners:camp.diners_default,arrival:camp.reception_weekday_default,locked:keepLocked?items.filter(i=>i.locked):[]});
-          setItems(res.items);setIssues(res.issues);setMetrics(res.metrics);setCapacityWarning(res.capacityWarning);setSeed(res.seed);setBulkResults([]);setManualOverride(false);
+          setItems(res.items);setIssues(res.issues);setMetrics(res.metrics);setCapacityWarning(res.capacityWarning);setSeed(res.seed);setBulkResults([]);
         }
       }catch(e){setMessage(e instanceof Error?e.message:"No se pudo generar el menú.");}
     });
@@ -101,21 +99,22 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
       const recipe=catalog.recipes.find(r=>r.id===recipeId);
       return {...i,recipe_id:recipeId,protein_id:recipe?.primary_protein_id??null,reasons:["Selección manual del administrador."]};
     });
-    setManualOverride(true);setCell(null);revalidate(next);
+    setCell(null);revalidate(next);
   }
 
   async function save(status:MenuStatus){
     if(!items.length)return;
-    if((metrics?.errors??0)>0||bulkResults.some(r=>r.errors>0)){setMessage(manualOverride?"El menú tiene alertas de reglas, pero la edición manual puede guardarse y aprobarse.":"Corrija las alertas de reglas antes de aprobar, o realice una edición manual si desea asumir la excepción.");if(status==="aprobado"&&!manualOverride)return;}
+    const hasHardErrors=(metrics?.errors??0)>0||bulkResults.some(r=>r.errors>0);
+    if(status==="aprobado"&&hasHardErrors){setMessage("El menú contiene errores críticos. Puede guardarlo como borrador, pero debe corregirlos antes de aprobar o exportar.");return;}
     setSaving(true);
     try{
-      if(bulkMode){await actionSaveBulkMenus({year,week,campIds,items,status,seed,allowRuleOverride:manualOverride});router.push("/menus");}
-      else if(camp){const d=cycleDates(year,week,camp.reception_weekday_default);const id=await actionSaveMenu({year,week,campId:camp.id,diners:camp.diners_default,arrival:camp.reception_weekday_default,items,status,notes:null,seed,start:d.start,end:d.end,validationScore:metrics?.complianceScore??0,varietyScore:metrics?.varietyScore??0,allowRuleOverride:manualOverride});router.push(`/menus/${id}`);}
+      if(bulkMode){await actionSaveBulkMenus({year,week,campIds,items,status,seed});router.push("/menus");}
+      else if(camp){const d=cycleDates(year,week,camp.reception_weekday_default);const id=await actionSaveMenu({year,week,campId:camp.id,diners:camp.diners_default,arrival:camp.reception_weekday_default,items,status,notes:null,seed,start:d.start,end:d.end,validationScore:metrics?.complianceScore??0,varietyScore:metrics?.varietyScore??0});router.push(`/menus/${id}`);}
     }catch(e){setMessage(e instanceof Error?e.message:"No se pudo guardar el menú.");}finally{setSaving(false);}
   }
 
   const hasRuleAlerts=(metrics?.errors??0)>0||bulkResults.some(r=>r.errors>0);
-  const exportBlocked=hasRuleAlerts&&!manualOverride;
+  const exportBlocked=hasRuleAlerts;
   const errorIssues=issues.filter(i=>i.level==="error");
   const warnIssues=issues.filter(i=>i.level==="warn");
   const activeItem=cell?items.find(i=>i.weekday===cell.weekday&&i.service===cell.service&&i.component===cell.component):null;
@@ -190,7 +189,7 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
       <section className={`no-print rounded-xl border px-4 py-3 ${errorIssues.length?"border-red-200 bg-red-50":"border-emerald-200 bg-emerald-50"}`}>
         <div className="flex flex-wrap items-center gap-3">
           <div className={`status-dot ${errorIssues.length?"bg-red-500":"bg-emerald-500"}`}/>
-          <div className="min-w-0 flex-1"><div className="font-semibold text-navy-900">{errorIssues.length?`${errorIssues.length} regla${errorIssues.length===1?"":"s"} requieren atención`:"Menú válido"}</div><div className="text-xs text-muted">{capacityWarning??(errorIssues.length?errorIssues[0]?.message:"21 platos fuertes · 6 sopas lunes-sábado · 10/14 ensaladas")}</div></div>
+          <div className="min-w-0 flex-1"><div className="font-semibold text-navy-900">{errorIssues.length?`${errorIssues.length} regla${errorIssues.length===1?"":"s"} requieren atención`:"Menú válido"}</div><div className="text-xs text-muted">{capacityWarning??(errorIssues.length?errorIssues[0]?.message:"21 platos fuertes · 6 sopas lunes-sábado · mínimo 5 ensaladas")}</div></div>
           {(errorIssues.length||warnIssues.length)?<details className="text-xs"><summary className="cursor-pointer font-semibold text-corp-700">Ver detalle</summary><div className="mt-2 max-w-2xl space-y-1">{[...errorIssues,...warnIssues].slice(0,12).map((i,n)=><div key={n}>{i.message}</div>)}</div></details>:null}
         </div>
       </section>
@@ -198,15 +197,15 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
       <section className="surface p-4 print-full">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div><h2 className="text-lg font-semibold text-navy-900">Semana {week} · {bulkMode?bulkLabel:camp?.name}</h2><p className="text-xs text-muted">Clic en un plato para reemplazarlo. Use el candado para conservarlo al regenerar.</p></div>
-          <div className="no-print flex flex-wrap gap-2"><button className="btn-ghost btn-sm" disabled={exportBlocked} onClick={()=>exportMenuPdf({items,catalog,week,parity,campId:camp?.id??"",campName:bulkMode?bulkLabel:camp?.name,diners:bulkMode?bulkCamps.reduce((sum,c)=>sum+c.diners_default,0):(camp?.diners_default??0),dinersLabel:bulkMode?`${bulkCamps.length} campamentos`:undefined,start:bulkMode?null:dates.start,end:bulkMode?null:dates.end})}>PDF</button><button className="btn-ghost btn-sm" disabled={exportBlocked} onClick={()=>exportMenuExcel({items,catalog,year,week,campName:bulkMode?bulkLabel||"Zonas":camp?.name??"Campamento",diners:bulkMode?bulkCamps.reduce((sum,c)=>sum+c.diners_default,0):(camp?.diners_default??0),start:bulkMode?null:dates.start,end:bulkMode?null:dates.end})}>Excel</button></div>
+          <div className="no-print flex flex-wrap gap-2"><button className="btn-ghost btn-sm" disabled={exportBlocked} title={exportBlocked?"Corrija los errores críticos antes de exportar.":undefined} onClick={()=>exportMenuPdf({items,catalog,week,parity,campId:camp?.id??"",campName:bulkMode?bulkLabel:camp?.name,diners:bulkMode?bulkCamps.reduce((sum,c)=>sum+c.diners_default,0):(camp?.diners_default??0),dinersLabel:bulkMode?`${bulkCamps.length} campamentos`:undefined,start:bulkMode?null:dates.start,end:bulkMode?null:dates.end})}>PDF</button><button className="btn-ghost btn-sm" disabled={exportBlocked} title={exportBlocked?"Corrija los errores críticos antes de exportar.":undefined} onClick={()=>exportMenuExcel({items,catalog,year,week,campName:bulkMode?bulkLabel||"Zonas":camp?.name??"Campamento",diners:bulkMode?bulkCamps.reduce((sum,c)=>sum+c.diners_default,0):(camp?.diners_default??0),start:bulkMode?null:dates.start,end:bulkMode?null:dates.end})}>Excel</button></div>
         </div>
         <MenuTable items={items} catalog={catalog} editable onCell={setCell} onToggleLock={toggleLock}/>
         <div className="no-print mt-4 flex justify-end gap-2 border-t border-line pt-4"><button className="btn-ghost" onClick={()=>save("borrador")} disabled={saving}>Guardar borrador</button><button className="btn-primary" onClick={()=>save("aprobado")} disabled={saving||exportBlocked}>Guardar y aprobar</button></div>
       </section>
     </>:<section className="empty-state"><div className="empty-icon">+</div><h2>Genera la planificación de la semana</h2><p>Escoge un campamento, varios campamentos o una o más zonas. Si reciben víveres en días distintos, el sistema desplaza automáticamente la misma secuencia de menú para cada campamento.</p></section>}
 
-    <Modal open={!!cell} onClose={()=>setCell(null)} wide title={cell?`${WEEKDAYS[cell.weekday].label} · ${cell.component==="soup"?"Sopa":cell.field==="salad"?"Ensalada":cell.service==="breakfast"?"Desayuno":cell.service==="lunch"?"Almuerzo":"Cena"}`:""} subtitle="Solo se muestran preparaciones válidas para este espacio.">
-      {cell?<div className="space-y-4">{cell.field==="recipe"&&activeItem?.reasons?.length?<div className="rounded-xl bg-corp-100 p-3 text-xs text-navy-800"><strong>Selección actual</strong><ul className="mt-1 list-disc pl-5">{activeItem.reasons.map((r,i)=><li key={i}>{r}</li>)}</ul></div>:null}<RecipePicker catalog={catalog} service={cell.field==="salad"?"salad":cell.component==="soup"?"soup":cell.service} weekday={cell.weekday} parity={parity} arrival={arrival} currentId={cell.field==="salad"?activeItem?.salad_recipe_id??null:activeItem?.recipe_id??null} usedRecipeIds={usedRecipeIds} proteinUseCounts={proteinUseCounts} lastUsed={lastUsed} items={items} diners={diners} onPick={pick}/></div>:null}
+    <Modal open={!!cell} onClose={()=>setCell(null)} wide title={cell?`${WEEKDAYS[cell.weekday].label} · ${cell.component==="soup"?"Sopa":cell.field==="salad"?"Ensalada":cell.service==="breakfast"?"Desayuno":cell.service==="lunch"?"Almuerzo":"Cena"}`:""} subtitle="Solo se pueden seleccionar preparaciones que cumplan las reglas duras del espacio.">
+      {cell?<div className="space-y-4">{cell.field==="recipe"&&activeItem?.reasons?.length?<div className="rounded-xl bg-corp-100 p-3 text-xs text-navy-800"><strong>Selección actual</strong><ul className="mt-1 list-disc pl-5">{activeItem.reasons.map((r,i)=><li key={i}>{r}</li>)}</ul></div>:null}<RecipePicker catalog={catalog} service={cell.field==="salad"?"salad":cell.component==="soup"?"soup":cell.service} weekday={cell.weekday} parity={parity} arrival={arrival} currentId={cell.field==="salad"?activeItem?.salad_recipe_id??null:activeItem?.recipe_id??null} usedRecipeIds={usedRecipeIds} lastUsed={lastUsed} items={items} diners={diners} onPick={pick}/></div>:null}
     </Modal>
   </div>;
 }

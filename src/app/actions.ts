@@ -1,4 +1,4 @@
-﻿"use server";
+"use server";
 
 import { revalidatePath } from "next/cache";
 import { getRepo, newId, slugify } from "@/lib/db";
@@ -76,18 +76,18 @@ export async function actionValidate(req:{items:MenuItem[];year:number;week:numb
   return validateMenu({items:shift?shiftMenuItems(req.items,-shift):req.items,catalog,parity:parityOfWeek(req.week),arrival:shift?shiftWeekday(req.arrival,-shift):req.arrival,year:req.year,week:req.week,campId:req.campId,diners:req.diners??camp?.diners_default??100,history});
 }
 
-export async function actionSaveMenu(menu:{id?:string;year:number;week:number;campId:string;diners:number;arrival:Weekday;items:MenuItem[];status:MenuStatus;notes:string|null;seed:string|null;start:string|null;end:string|null;validationScore:number;varietyScore:number;allowRuleOverride?:boolean;scheduleShiftDays?:number}):Promise<string>{
+export async function actionSaveMenu(menu:{id?:string;year:number;week:number;campId:string;diners:number;arrival:Weekday;items:MenuItem[];status:MenuStatus;notes:string|null;seed:string|null;start:string|null;end:string|null;validationScore:number;varietyScore:number;scheduleShiftDays?:number}):Promise<string>{
   const repo=getRepo();const id=menu.id??newId("menu");
   if(menu.status==="aprobado"){
     const [catalog,history]=await Promise.all([repo.getCatalog(),repo.listMenus()]);const shift=menu.scheduleShiftDays??0;
     const validation=validateMenu({items:shift?shiftMenuItems(menu.items,-shift):menu.items,catalog,parity:parityOfWeek(menu.week),arrival:shift?shiftWeekday(menu.arrival,-shift):menu.arrival,year:menu.year,week:menu.week,campId:menu.campId,diners:menu.diners,history:history.filter(m=>m.id!==menu.id)});
-    if(validation.metrics.errors>0&&!menu.allowRuleOverride)throw new Error(`El menú tiene ${validation.metrics.errors} error(es) de reglas y no puede aprobarse.`);
+    if(validation.metrics.errors>0)throw new Error(`El menú tiene ${validation.metrics.errors} error(es) de reglas y no puede aprobarse.`);
   }
   const record:WeeklyMenu={id,year:menu.year,week_number:menu.week,parity:parityOfWeek(menu.week),camp_id:menu.campId,diners:menu.diners,supply_arrival_weekday:menu.arrival,actual_start_date:menu.start,actual_end_date:menu.end,status:menu.status,validation_score:menu.validationScore,variety_score:menu.varietyScore,seed:menu.seed,notes:menu.notes,created_at:new Date().toISOString(),schedule_shift_days:menu.scheduleShiftDays??0,items:menu.items.map(i=>({execution_status:"pending",replacement_name:null,...i}))};
   await repo.saveMenu(record);revalidatePath("/menus");revalidatePath("/");return id;
 }
 
-export async function actionSaveBulkMenus(req:{year:number;week:number;campIds:string[];items:MenuItem[];status:MenuStatus;seed:string|null;allowRuleOverride?:boolean}){
+export async function actionSaveBulkMenus(req:{year:number;week:number;campIds:string[];items:MenuItem[];status:MenuStatus;seed:string|null}){
   const repo=getRepo();const [catalog,history]=await Promise.all([repo.getCatalog(),repo.listMenus()]);const parity=parityOfWeek(req.week);
   const camps=req.campIds.map(id=>catalog.camps.find(c=>c.id===id)).filter((c):c is Camp=>!!c&&c.active);if(!camps.length)throw new Error("Seleccione al menos un campamento activo.");
   const saved:{campId:string;menuId:string}[]=[];const base=camps[0];
@@ -95,7 +95,7 @@ export async function actionSaveBulkMenus(req:{year:number;week:number;campIds:s
     const shiftDays=weekdayShift(base.reception_weekday_default,camp.reception_weekday_default);const shiftedItems=shiftMenuItems(req.items,shiftDays);
     // Se valida en coordenadas base; al reabrir/aprobar se normaliza con schedule_shift_days.
     const validation=validateMenu({items:req.items,catalog,parity,arrival:base.reception_weekday_default,year:req.year,week:req.week,campId:camp.id,diners:camp.diners_default,history});
-    if(req.status==="aprobado"&&validation.metrics.errors>0&&!req.allowRuleOverride)throw new Error(`${camp.name} tiene ${validation.metrics.errors} error(es) de reglas.`);
+    if(req.status==="aprobado"&&validation.metrics.errors>0)throw new Error(`${camp.name} tiene ${validation.metrics.errors} error(es) de reglas.`);
     const {start,end}=cycleDates(req.year,req.week,camp.reception_weekday_default);const menuId=newId("menu");
     await repo.saveMenu({id:menuId,year:req.year,week_number:req.week,parity,camp_id:camp.id,diners:camp.diners_default,supply_arrival_weekday:camp.reception_weekday_default,actual_start_date:start,actual_end_date:end,status:req.status,validation_score:validation.metrics.complianceScore,variety_score:validation.metrics.varietyScore,seed:req.seed,notes:`Menú compartido base ${base.name}; desplazamiento ${shiftDays} día(s) según recepción de víveres.`,created_at:new Date().toISOString(),schedule_shift_days:shiftDays,items:shiftedItems.map(i=>({...i,execution_status:"pending",replacement_name:null}))});
     saved.push({campId:camp.id,menuId});
