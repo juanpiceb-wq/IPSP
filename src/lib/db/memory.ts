@@ -1,5 +1,5 @@
 import { CAMPS, MASTER_INGREDIENTS, PRODUCTS, PROTEINS, RECIPES, historicalMenus } from "../seed/data";
-import { currentProteinOverrides } from "../seed/currentOverrides";
+import { currentCampOverrides, currentProteinOverrides } from "../seed/currentOverrides";
 import type {
   Camp,
   Catalog,
@@ -35,7 +35,7 @@ function store(): Store {
       proteins: clone(currentProteinOverrides(PROTEINS)),
       products: clone(PRODUCTS),
       recipes: clone(RECIPES),
-      camps: clone(CAMPS),
+      camps: clone(currentCampOverrides(CAMPS)),
       zones: [],
       menus: clone(historicalMenus()),
     };
