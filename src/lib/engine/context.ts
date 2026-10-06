@@ -9,7 +9,7 @@
   Weekday,
   WeeklyMenu,
 } from "../types";
-import { RULES, cyclePosition } from "../rules";
+import { RULES, cyclePosition, firstUsablePosition } from "../rules";
 
 export interface HistoryIndex {
   recipeAgo: Map<string, number>;
@@ -188,7 +188,7 @@ export function blockingReason(
       return `${prod.name} no está disponible en semana ${ctx.parity}.`;
     if (prod.arrival_weekday !== null) {
       const pos = cyclePosition(weekday, ctx.arrival);
-      const minPos = cyclePosition(prod.arrival_weekday, ctx.arrival) + 1;
+      const minPos = firstUsablePosition(prod.arrival_weekday, ctx.arrival);
       if (pos < minPos) return `${prod.name} llega ese día y no puede programarse antes.`;
     }
   }
@@ -357,4 +357,3 @@ export function weeklyDishKey(name: string): string {
   if (root && first && !GENERIC_DISH_ROOTS.has(first)) return `family:${root}`;
   return `exact:${clean}`;
 }
-
