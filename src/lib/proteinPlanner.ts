@@ -1,5 +1,5 @@
 import type { Catalog, MainService, MenuItem, Parity, Weekday } from "./types";
-import { cycleOrder } from "./rules";
+import { RULES, cycleOrder } from "./rules";
 
 type EligibleSlot={weekday:number;service:string;component:string;ids:string[]};
 export type ProteinSlot={weekday:Weekday;service:MainService;proteinId:string};
@@ -46,7 +46,10 @@ export function buildExactProteinPlan(args:{catalog:Catalog;parity:Parity;arriva
    for(const [key,other] of assigned){
      if(other!==pid) continue;
      const od=Number(key.split("|")[0]) as Weekday;
-     if(Math.abs((pos.get(od)??0)-p)<=1) return true;
+     const otherPos=pos.get(od)??0;
+     const direct=Math.abs(otherPos-p);
+     const circular=Math.min(direct,cycle.length-direct);
+     if(circular<=RULES.MIN_PROTEIN_GAP_DAYS) return true;
    }
    return false;
  };
@@ -113,6 +116,6 @@ export function buildExactProteinPlan(args:{catalog:Catalog;parity:Parity;arriva
    for(const pid of options){place(pid,s);if(feasible()&&solve(i+1))return true;unplace(pid,s);}
    return false;
  };
- if(!solve(0))throw new Error("No existe una distribución válida de las 21 proteínas con las cuotas y reglas actuales, incluyendo Pollo en el primer día posterior a recepción.");
+ if(!solve(0))throw new Error("No existe una distribución válida de las 21 proteínas con las cuotas y reglas actuales, incluyendo Pollo en el primer día posterior a recepción y separación entre días contiguos, incluso al cruzar el cierre del ciclo.");
  return [...assigned.entries()].map(([key,proteinId])=>{const [d,s]=key.split("|");return{weekday:Number(d) as Weekday,service:s as MainService,proteinId};});
 }
