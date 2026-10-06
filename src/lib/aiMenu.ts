@@ -29,7 +29,7 @@ REGLAS DURAS:
 - Conserva BLOQUEADOS exactamente.
 - Asigna al menos 5 ensaladas compatibles en almuerzos/cenas, usando recetas service=salad. Como preferencia BLANDA, repártelas entre la mayor cantidad razonable de días y evita concentrar dos ensaladas en un día si puedes colocarlas en días distintos compatibles.
 - Tomate, cebolla, pimiento, vegetales de refrito, condimentos y vegetales secundarios son disponibilidad SUAVE: nunca deben impedir un plato.
-- Los consumos calculados en LB/UN/SERVICIO son solo informativos y NUNCA invalidan ni condicionan la selección. Los únicos topes de cantidad duros son los máximos semanales por protein/primary_protein_id.
+- Los consumos calculados en LB/UN/SERVICIO son solo informativos y NUNCA invalidan ni condicionan la selección. La frecuencia target de cada protein/primary_protein_id debe cumplirse EXACTAMENTE: ni más ni menos.\n- Ingrediente base puede repetirse en días consecutivos UNA sola vez por semana; una segunda repetición consecutiva ya no está permitida.
 - Busca variedad y evita preparaciones recientes.
 SOPAS (PREFERENCIA BLANDA, nunca invalida): procura variedad incluyendo pata/costilla, hueso carnudo, crema, menestrón y sopa sin proteína.
 PROTEINAS=${JSON.stringify(proteins)}
@@ -138,7 +138,7 @@ RECIENTES=${JSON.stringify(recent)}\n${input.currentItems?.length?`MODO REPARACI
     it.salad_recipe_id=null;it.reasons=["Ajustado automáticamente para cumplir máximos semanales y rotación de origen."];
     return true;
   };
-  // Máximo semanal de cada proteína (camarón 2, fritada 3, chuleta 2, tilapia 1, etc.).
+  // Frecuencia semanal exacta de cada proteína: el target es obligatorio, no solo un máximo (camarón 2, fritada 3, chuleta 2, tilapia 1, etc.).
   for(const p of input.catalog.proteins.filter(p=>p.active&&p.target_frequency>0)){
     let same=items.filter(x=>x.component==="main"&&x.protein_id===p.id);
     while(same.length>p.target_frequency){
