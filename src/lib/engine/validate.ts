@@ -126,6 +126,24 @@ export function validateMenu(input: ValidateInput): ValidationResult {
   if (!familyRepeats)
     issues.push({ level: "ok", rule: "familia-plato-semana", message: "No se repiten familias de platos durante la semana." });
 
+  // Los 21 platos fuertes deben tener proteína estructurada y una receta exacta
+  // no puede repetirse dentro de la misma semana.
+  for (const it of mains) {
+    if (!it.protein_id)
+      issues.push({ level: "error", rule: "proteina-obligatoria", message: `${WEEKDAYS[it.weekday].label} · ${serviceLabel(it.service)}: ${it.recipe_name} no tiene proteína estructurada asignada.`, weekday: it.weekday, service: it.service });
+  }
+  const exactRecipes = new Map<string, MenuItem[]>();
+  for (const it of mains) {
+    if (!it.recipe_id) continue;
+    const arr = exactRecipes.get(it.recipe_id) ?? [];
+    arr.push(it);
+    exactRecipes.set(it.recipe_id, arr);
+  }
+  for (const arr of exactRecipes.values()) {
+    if (arr.length > 1)
+      issues.push({ level: "error", rule: "plato-exacto-repetido", message: `${arr[0].recipe_name} se repite ${arr.length} veces en la semana. Una preparación exacta solo puede aparecer una vez.` });
+  }
+
   // Proteína repetida el mismo día.
   let repeated = 0;
   for (const day of WEEKDAYS) {
