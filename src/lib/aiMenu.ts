@@ -123,6 +123,43 @@ RECIENTES=${JSON.stringify(recent)}\n${input.currentItems?.length?`MODO REPARACI
     it.reasons=["Ajustado automáticamente para garantizar plato único y proteína estructurada."];
     usedMainIds.add(replacement.id);
   }
+  // Cierre determinístico de máximos semanales por proteína y origen cerdo.
+  // No usa consumos físicos; solo protein_id, target_frequency y origin.
+  const proteinById=new Map(input.catalog.proteins.map(p=>[p.id,p]));
+  const replaceMain=(it:MenuItem, reject:(r:NonNullable<ReturnType<typeof recipeById.get>>)=>boolean)=>{
+    const key=`${it.weekday}|${it.service}|main`;
+    const usedIds=new Set(items.filter(x=>x!==it&&x.component==="main"&&x.recipe_id).map(x=>x.recipe_id!));
+    const candidates=(slotMap.get(key)??[]).map(id=>recipeById.get(id))
+      .filter((r):r is NonNullable<typeof r>=>!!r&&!!r.primary_protein_id&&!usedIds.has(r.id)&&!reject(r));
+    candidates.sort((a,b)=>(proteinUses.get(a.primary_protein_id!)??0)-(proteinUses.get(b.primary_protein_id!)??0));
+    const r=candidates[0]; if(!r)return false;
+    if(it.protein_id)proteinUses.set(it.protein_id,Math.max(0,(proteinUses.get(it.protein_id)??1)-1));
+    it.recipe_id=r.id;it.protein_id=r.primary_protein_id;proteinUses.set(it.protein_id!, (proteinUses.get(it.protein_id!)??0)+1);
+    it.salad_recipe_id=null;it.reasons=["Ajustado automáticamente para cumplir máximos semanales y rotación de origen."];
+    return true;
+  };
+  // Máximo semanal de cada proteína (camarón 2, fritada 3, chuleta 2, tilapia 1, etc.).
+  for(const p of input.catalog.proteins.filter(p=>p.active&&p.target_frequency>0)){
+    let same=items.filter(x=>x.component==="main"&&x.protein_id===p.id);
+    while(same.length>p.target_frequency){
+      const it=same[same.length-1];
+      if(!replaceMain(it,r=>r.primary_protein_id===p.id))break;
+      same=items.filter(x=>x.component==="main"&&x.protein_id===p.id);
+    }
+  }
+  // Cerdo: máximo dos platos porcinos en un mismo día y esa doble coincidencia
+  // puede ocurrir solamente una vez por semana. Chorizo sigue siendo neutro.
+  let porkPairUsed=false;
+  for(let d=0;d<7;d++){
+    let pork=items.filter(x=>x.component==="main"&&x.weekday===d&&x.protein_id&&x.protein_id!=="chorizo"&&proteinById.get(x.protein_id)?.origin==="cerdo");
+    const allowed=porkPairUsed?1:2;
+    while(pork.length>allowed){
+      const it=pork[pork.length-1];
+      if(!replaceMain(it,r=>proteinById.get(r.primary_protein_id!)?.origin==="cerdo"&&r.primary_protein_id!=="chorizo"))break;
+      pork=items.filter(x=>x.component==="main"&&x.weekday===d&&x.protein_id&&x.protein_id!=="chorizo"&&proteinById.get(x.protein_id)?.origin==="cerdo");
+    }
+    if(pork.length===2)porkPairUsed=true;
+  }
   const salads=input.catalog.recipes.filter(r=>r.active&&r.services.includes("salad"));
   let saladCount=items.filter(i=>(i.service==="lunch"||i.service==="dinner")&&!!i.salad_recipe_id).length;
   for(const item of items){if(saladCount>=5)break;if(item.component!=="main"||(item.service!=="lunch"&&item.service!=="dinner")||item.salad_recipe_id||!item.recipe_id)continue;const main=recipeById.get(item.recipe_id);if(!main||!mainAllowsSalad(main))continue;const salad=salads.find(s=>saladAllowedForMain(main,s));if(salad){item.salad_recipe_id=salad.id;saladCount++;}}
