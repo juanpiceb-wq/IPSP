@@ -4,6 +4,8 @@ import { getRepo } from "@/lib/db";
 import { isoWeekOf } from "@/lib/dates";
 
 export const dynamic="force-dynamic";
+export const maxDuration=120;
+
 export default async function GenerarPage({searchParams}:{searchParams:{year?:string;week?:string;camp?:string}}){
   const repo=getRepo(); const [catalog,history]=await Promise.all([repo.getCatalog(),repo.listMenus()]);
   const now=isoWeekOf(new Date()); const year=Number(searchParams.year)||now.year; const week=Number(searchParams.week)||Math.min(now.week+1,53); const campId=searchParams.camp||catalog.camps.find(c=>c.active)?.id||"";
