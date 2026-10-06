@@ -18,7 +18,16 @@ export async function generateMenuWithAI(input:AiMenuInput):Promise<{items:MenuI
   const apiKey=process.env.OPENAI_API_KEY;
   if(!apiKey)throw new Error("OPENAI_API_KEY no está configurada en el servidor.");
 
-  const recent=input.history.slice(0,8).map(m=>m.items.filter(i=>i.recipe_id).map(i=>i.recipe_id));
+  const prior=(m:WeeklyMenu)=>m.year<input.year||(m.year===input.year&&m.week_number<input.week);
+  const byCamp=input.history.filter(m=>m.camp_id===input.campId&&prior(m));
+  const source=(byCamp.length?byCamp:input.history.filter(prior)).sort((a,b)=>b.year-a.year||b.week_number-a.week_number);
+  const uniqueWeeks:WeeklyMenu[]=[];const weekKeys=new Set<string>();
+  for(const m of source){const k=`${m.year}-${m.week_number}`;if(weekKeys.has(k))continue;weekKeys.add(k);uniqueWeeks.push(m);if(uniqueWeeks.length>=8)break;}
+  const recent=uniqueWeeks.map(m=>m.items.filter(i=>i.recipe_id).map(i=>i.recipe_id));
+  const weights=[2000,1200,800,500,300,200,120,80];
+  const recencyPenalty:Record<string,number>={};
+  recent.forEach((ids,idx)=>ids.forEach(id=>{if(id)recencyPenalty[id]=Math.max(recencyPenalty[id]??0,weights[idx]??0);}));
+
   const hist=buildHistoryIndex(input.history,input.year,input.week,input.campId,input.catalog);
   const ctx=buildContext(input.catalog,input.parity,input.arrival,hist);
   const eligibleBySlot:EligibleSlot[]=input.eligibleBySlotOverride
@@ -48,6 +57,7 @@ export async function generateMenuWithAI(input:AiMenuInput):Promise<{items:MenuI
     id:p.id,name:p.name,origin:p.origin,exact:p.target_frequency,breakfast_only:p.breakfast_only,soup_only:p.soup_only,parity:p.parity,
   }));
   const locked=(input.locked??[]).filter(i=>i.locked&&i.recipe_id).map(i=>({weekday:i.weekday,service:i.service,component:i.component,recipe_id:i.recipe_id}));
+  const previousArrival=((input.arrival+6)%7) as Weekday;
 
   const prompt=`Selecciona preparaciones variadas para un menú semanal IPSP usando EXCLUSIVAMENTE IDs permitidos.
 Semana ${input.week}/${input.year}; paridad ${input.parity}; recepción weekday=${input.arrival}; comensales=${input.diners}.
@@ -64,7 +74,7 @@ REGLAS:
 - Huevo y Atún solo desayuno. Sardina solo almuerzo salvo Corviche de sardina en desayuno.
 - Pollo debe aparecer el primer día posterior a recepción; esta condición ya está incorporada en PLAN_PROTEINAS.
 - Domingo almuerzo: ceviche fijo. Domingo cena: preparación sunday_roast; sunday_roast no se usa fuera de esa cena.
-- Solo una vez por semana pueden coincidir dos proteínas de origen cerdo en el mismo día; nunca tres. Chorizo es neutro para origen.
+- Cuando coinciden dos proteínas de origen cerdo en el mismo día, el motor solo permite desayuno + cena; nunca desayuno + almuerzo ni almuerzo + cena. Chorizo es neutro para origen.
 - Dificultad diaria de los tres platos fuertes <= 6.
 - Puede existir UNA sola repetición de ingrediente base entre días consecutivos por semana.
 - No repetir la misma salsa el mismo día ni en días consecutivos.
@@ -72,14 +82,15 @@ REGLAS:
 - Sopas: su composición (crema, menestrón, etc.) es preferencia, no bloqueo.
 - Ensaladas: mínimo 5 compatibles; su distribución es preferencia.
 - Conserva bloqueados.
-- Prioriza variedad frente a semanas recientes.
+- VARIEDAD HISTÓRICA: evita con máxima prioridad las recetas usadas la semana inmediatamente anterior; luego las de hace 2 semanas y reduce gradualmente la penalización hasta 8 semanas. Esto es preferencia, nunca debe romper una regla dura.
+- CHAULAFÁN: si eliges una receta cuyo nombre o ID contiene "chaulaf", ubícala idealmente el weekday=${input.arrival} (día de recepción de víveres) o weekday=${previousArrival} (día anterior). Evita ubicar chaulafán en otros días si existe alternativa válida.
 
 PROTEINAS=${JSON.stringify(proteins)}
 CATALOGO=${JSON.stringify(recipes)}
 OPCIONES_VALIDAS_POR_ESPACIO=${JSON.stringify(eligibleBySlot)}
 Cada recipe_id debe pertenecer a los ids del mismo weekday/service/component en OPCIONES_VALIDAS_POR_ESPACIO.
 BLOQUEADOS=${JSON.stringify(locked)}
-RECIENTES=${JSON.stringify(recent)}
+RECIENTES_POR_SEMANA_MAS_NUEVA_PRIMERO=${JSON.stringify(recent)}
 ${input.currentItems?.length?`MENÚ_PREVIO=${JSON.stringify(input.currentItems.map(i=>({weekday:i.weekday,service:i.service,component:i.component,recipe_id:i.recipe_id})))}\nINCUMPLIMIENTOS_PREVIOS=${JSON.stringify((input.repairIssues??[]).slice(0,40))}`:""}`;
 
   const recipeIds=recipes.map(r=>r.id);
@@ -100,7 +111,7 @@ ${input.currentItems?.length?`MENÚ_PREVIO=${JSON.stringify(input.currentItems.m
     if(!outputText)throw new Error("OpenAI no devolvió un menú estructurado.");
     const parsed=JSON.parse(outputText) as {items:AiChoice[]};
     const preferences:RecipePreference[]=parsed.items.map(x=>({weekday:x.weekday,service:x.service,component:x.component,recipe_id:x.recipe_id,salad_recipe_id:x.salad_recipe_id}));
-    const items=finalizeMenu({catalog:input.catalog,parity:input.parity,arrival:input.arrival,eligibleBySlot,proteinPlan,preferences,locked:input.locked});
+    const items=finalizeMenu({catalog:input.catalog,parity:input.parity,arrival:input.arrival,eligibleBySlot,proteinPlan,preferences,locked:input.locked,recencyPenalty});
     return{items,seed:`ai-${Date.now()}`};
   }catch(err:any){
     if(err?.name==="AbortError"){console.error("[openai-menu] timeout",{timeoutMs});throw new Error(`OpenAI no respondió en ${timeoutMs/1000} segundos. Intente nuevamente.`);}
