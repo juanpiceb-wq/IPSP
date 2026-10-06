@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { formatDate } from "./dates";
 import { WEEKDAYS } from "./types";
@@ -152,8 +152,7 @@ export function buildMenuPdf(input: ExportMenuPdfInput): Uint8Array {
   // Footer discreto, independiente del contenido administrativo de la app.
   const footerY = PAGE_H - BOTTOM + 2;
   drawLine(push, MARGIN_X, footerY - 9, PAGE_W - MARGIN_X, footerY - 9, GRID, 0.6);
-  drawText(push, "Todos los servicios incluyen arroz.", MARGIN_X, footerY, 6.8, MUTED, false);
-
+  drawText(push, "Todos los servicios incluyen arroz por defecto, excepto preparaciones con arroz integrado.", MARGIN_X, footerY, 6.8, MUTED, false);
 
   // Si algún nombre excepcionalmente largo empuja la tabla hacia abajo, el PDF sigue
   // siendo de una sola página; el tamaño anterior está pensado para el catálogo actual.
@@ -396,7 +395,3 @@ function makePdf(stream: Uint8Array): Uint8Array {
   parts.push(ascii(xref));
   return concat(parts);
 }
-
-
-
-
