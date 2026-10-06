@@ -1,11 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { actionGenerate, actionValidateBulk, type BulkCampResult, type GenerateRequest, type GenerateResponse } from "@/app/actions";
+import { actionGenerate, actionValidateBulk, type GenerateRequest, type GenerateResponse } from "@/app/actions";
 import { getRepo, newId } from "@/lib/db";
 import { cycleDates } from "@/lib/dates";
 import { validateMenu } from "@/lib/engine/validate";
 import { parityOfWeek } from "@/lib/rules";
+import { normalizeSharedItems, projectSharedItems } from "@/lib/sharedWeek";
 import type { Camp, MenuItem, MenuStatus, Weekday, WeeklyMenu } from "@/lib/types";
 
 export async function actionGenerateShared(req: GenerateRequest): Promise<GenerateResponse> {
@@ -15,14 +16,13 @@ export async function actionGenerateShared(req: GenerateRequest): Promise<Genera
   if (!template) return actionGenerate(req);
 
   const canonical = canonicalFromTemplate(template);
-  const targetShift = weekdayShift(canonical.arrival, req.arrival);
-  const items = shiftMenuItems(canonical.items, targetShift);
+  const items = projectSharedItems(canonical.items, canonical.arrival, req.arrival);
   const history = menus.filter((m) => !(m.year === req.year && m.week_number === req.week));
   const validation = validateMenu({
-    items: canonical.items,
+    items,
     catalog,
     parity: parityOfWeek(req.week),
-    arrival: canonical.arrival,
+    arrival: req.arrival,
     year: req.year,
     week: req.week,
     campId: req.campId,
@@ -30,14 +30,14 @@ export async function actionGenerateShared(req: GenerateRequest): Promise<Genera
     history,
   });
   const hard = validation.issues.filter((i) => i.level === "error");
-  if (hard.length) throw new Error(`El menú maestro de la semana ${req.week} tiene ${hard.length} regla(s) crítica(s).`);
+  if (hard.length) throw new Error(`El menú maestro de la semana ${req.week} adaptado a este campamento tiene ${hard.length} regla(s) crítica(s).`);
   const { start, end } = cycleDates(req.year, req.week, req.arrival);
   return {
     items,
     seed: template.seed ?? `shared-${req.year}-${req.week}`,
     issues: validation.issues,
     metrics: validation.metrics,
-    capacityWarning: `Semana ${req.week}: se reutilizó el menú maestro ya creado.`,
+    capacityWarning: `Semana ${req.week}: se reutilizó el menú maestro. Día 1 inicia después de víveres y domingo permanece fijo.`,
     start,
     end,
   };
@@ -57,8 +57,26 @@ export async function actionGenerateBulkShared(req: { year: number; week: number
     arrival: base.reception_weekday_default,
     seed: req.seed,
   });
-  const checked = await actionValidateBulk({ year: req.year, week: req.week, campIds: req.campIds, items: generated.items });
-  return { ...generated, issues: checked.issues, metrics: checked.metrics, campResults: checked.campResults };
+  const campResults = [];
+  let primaryIssues = generated.issues;
+  let primaryMetrics = generated.metrics;
+  for (const camp of camps) {
+    const projected = projectSharedItems(generated.items, base.reception_weekday_default, camp.reception_weekday_default);
+    const validation = validateMenu({
+      items: projected,
+      catalog,
+      parity: parityOfWeek(req.week),
+      arrival: camp.reception_weekday_default,
+      year: req.year,
+      week: req.week,
+      campId: camp.id,
+      diners: camp.diners_default,
+      history: [],
+    });
+    if (camp.id === base.id) { primaryIssues = validation.issues; primaryMetrics = validation.metrics; }
+    campResults.push({campId:camp.id,campName:camp.name,diners:camp.diners_default,arrival:camp.reception_weekday_default,shiftDays:0,errors:validation.metrics.errors,warnings:validation.metrics.warnings,varietyScore:validation.metrics.varietyScore});
+  }
+  return { ...generated, issues: primaryIssues, metrics: primaryMetrics, campResults };
 }
 
 interface SaveSharedInput {
@@ -87,21 +105,19 @@ export async function actionSaveSharedMenu(menu: SaveSharedInput): Promise<strin
 
   const template = selectWeekTemplate(menus, menu.year, menu.week);
   const baseArrival = template ? canonicalFromTemplate(template).arrival : menu.arrival;
-  const sourceShift = weekdayShift(baseArrival, menu.arrival);
-  const canonicalItems = shiftMenuItems(menu.items, -sourceShift);
+  const canonicalItems = normalizeSharedItems(menu.items, menu.arrival, baseArrival);
   const history = menus.filter((m) => !(m.year === menu.year && m.week_number === menu.week));
   let sourceId = menu.id ?? "";
 
   for (const camp of activeCamps) {
     const existing = menus.find((m) => m.year === menu.year && m.week_number === menu.week && m.camp_id === camp.id);
     if (existing && menuStarted(existing) && existing.id !== menu.id) continue;
-    const shiftDays = weekdayShift(baseArrival, camp.reception_weekday_default);
-    const shiftedItems = shiftMenuItems(canonicalItems, shiftDays);
+    const projectedItems = projectSharedItems(canonicalItems, baseArrival, camp.reception_weekday_default);
     const validation = validateMenu({
-      items: canonicalItems,
+      items: projectedItems,
       catalog,
       parity: parityOfWeek(menu.week),
-      arrival: baseArrival,
+      arrival: camp.reception_weekday_default,
       year: menu.year,
       week: menu.week,
       campId: camp.id,
@@ -109,7 +125,7 @@ export async function actionSaveSharedMenu(menu: SaveSharedInput): Promise<strin
       history,
     });
     if (menu.status === "aprobado" && validation.metrics.errors > 0) {
-      throw new Error(`${camp.name} tiene ${validation.metrics.errors} error(es) de reglas.`);
+      throw new Error(`${camp.name} tiene ${validation.metrics.errors} error(es) de reglas con el menú compartido.`);
     }
     const id = existing?.id ?? (camp.id === menu.campId && menu.id ? menu.id : newId("menu"));
     if (camp.id === menu.campId) sourceId = id;
@@ -128,10 +144,10 @@ export async function actionSaveSharedMenu(menu: SaveSharedInput): Promise<strin
       validation_score: validation.metrics.complianceScore,
       variety_score: validation.metrics.varietyScore,
       seed: menu.seed,
-      notes: `Menú maestro semanal ${menu.year}-${menu.week}. Misma secuencia para todos los campamentos; solo cambia el calendario según recepción.`,
+      notes: `Menú maestro semanal ${menu.year}-${menu.week}. Día 1 es el día posterior a recepción; domingo queda anclado al calendario.`,
       created_at: existing?.created_at ?? new Date().toISOString(),
-      schedule_shift_days: shiftDays,
-      items: shiftedItems.map((i) => ({ ...i, execution_status: "pending", replacement_name: null, salad_execution_status: "pending", beverage_execution_status: "pending" })),
+      schedule_shift_days: 0,
+      items: projectedItems.map((i) => ({ ...i, execution_status: "pending", replacement_name: null, salad_execution_status: "pending", beverage_execution_status: "pending" })),
     });
   }
 
@@ -172,22 +188,17 @@ function selectWeekTemplate(menus: WeeklyMenu[], year: number, week: number): We
 }
 
 function canonicalFromTemplate(menu: WeeklyMenu) {
-  const shift = menu.schedule_shift_days ?? 0;
-  return { arrival: shiftWeekday(menu.supply_arrival_weekday, -shift), items: shiftMenuItems(menu.items, -shift) };
+  const legacyShift = menu.schedule_shift_days ?? 0;
+  if (!legacyShift) return { arrival: menu.supply_arrival_weekday, items: menu.items.map(i=>({...i})) };
+  const masterArrival = shiftWeekday(menu.supply_arrival_weekday, -legacyShift);
+  return { arrival: masterArrival, items: shiftMenuItemsLegacy(menu.items, -legacyShift) };
 }
 
 function shiftWeekday(day: Weekday, delta: number): Weekday {
   return (((day + delta) % 7 + 7) % 7) as Weekday;
 }
 
-function weekdayShift(baseArrival: Weekday, targetArrival: Weekday) {
-  let delta = targetArrival - baseArrival;
-  if (delta > 3) delta -= 7;
-  if (delta < -3) delta += 7;
-  return delta;
-}
-
-function shiftMenuItems(items: MenuItem[], delta: number): MenuItem[] {
+function shiftMenuItemsLegacy(items: MenuItem[], delta: number): MenuItem[] {
   if (!delta) return items.map((i) => ({ ...i }));
   return items.map((i) => ({ ...i, weekday: shiftWeekday(i.weekday, delta) }));
 }
