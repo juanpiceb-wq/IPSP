@@ -1,4 +1,5 @@
 import { MemoryRepo } from "../src/lib/db/memory";
+import { SupabaseRepo } from "../src/lib/db/supabase";
 import { blockingReason, buildContext, buildHistoryIndex } from "../src/lib/engine/context";
 import { validateMenu } from "../src/lib/engine/validate";
 import { finalizeMenu, type EligibleSlot } from "../src/lib/menuFinalizer";
@@ -7,10 +8,14 @@ import { parityOfWeek } from "../src/lib/rules";
 import type { MainService, Weekday } from "../src/lib/types";
 
 async function main(){
-  const repo=new MemoryRepo();
+  const url=process.env.SUPABASE_URL??process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key=process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const repo=url&&key?new SupabaseRepo(url,key):new MemoryRepo();
+  console.log(`[smoke] catalog source=${repo.mode}`);
   const catalog=await repo.getCatalog();
-  const history=await repo.listMenus();
+  const history=await repo.listMenus({limit:10});
   const arrivals=[...new Set(catalog.camps.filter(c=>c.active).map(c=>c.reception_weekday_default))];
+  if(!arrivals.length)throw new Error("Smoke: no active reception day available.");
   let checked=0;
 
   for(const week of [40,41]){
