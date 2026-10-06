@@ -29,15 +29,15 @@ export async function actionGenerateShared(req: GenerateRequest): Promise<Genera
     diners: req.diners,
     history,
   });
-  const hard = validation.issues.filter((i) => i.level === "error");
-  if (hard.length) throw new Error(`El menú maestro de la semana ${req.week} adaptado a este campamento tiene ${hard.length} regla(s) crítica(s).`);
   const { start, end } = cycleDates(req.year, req.week, req.arrival);
   return {
     items,
     seed: template.seed ?? `shared-${req.year}-${req.week}`,
     issues: validation.issues,
     metrics: validation.metrics,
-    capacityWarning: `Semana ${req.week}: se reutilizó el menú maestro. Día 1 inicia después de víveres y domingo permanece fijo.`,
+    capacityWarning: validation.metrics.errors
+      ? `Semana ${req.week}: se reutilizó el menú maestro con ${validation.metrics.errors} alerta(s) de validación. Puede revisarse, aprobarse y exportarse.`
+      : `Semana ${req.week}: se reutilizó el menú maestro. Día 1 inicia después de víveres y domingo permanece fijo.`,
     start,
     end,
   };
@@ -124,9 +124,6 @@ export async function actionSaveSharedMenu(menu: SaveSharedInput): Promise<strin
       diners: camp.diners_default,
       history,
     });
-    if (menu.status === "aprobado" && validation.metrics.errors > 0) {
-      throw new Error(`${camp.name} tiene ${validation.metrics.errors} error(es) de reglas con el menú compartido.`);
-    }
     const id = existing?.id ?? (camp.id === menu.campId && menu.id ? menu.id : newId("menu"));
     if (camp.id === menu.campId) sourceId = id;
     const { start, end } = cycleDates(menu.year, menu.week, camp.reception_weekday_default);
@@ -144,7 +141,7 @@ export async function actionSaveSharedMenu(menu: SaveSharedInput): Promise<strin
       validation_score: validation.metrics.complianceScore,
       variety_score: validation.metrics.varietyScore,
       seed: menu.seed,
-      notes: `Menú maestro semanal ${menu.year}-${menu.week}. Día 1 es el día posterior a recepción; domingo queda anclado al calendario.`,
+      notes: `Menú maestro semanal ${menu.year}-${menu.week}. Día 1 es el día posterior a recepción; domingo queda anclado al calendario.${validation.metrics.errors ? ` Aprobado/guardado con ${validation.metrics.errors} alerta(s) de validación.` : ""}`,
       created_at: existing?.created_at ?? new Date().toISOString(),
       schedule_shift_days: 0,
       items: projectedItems.map((i) => ({ ...i, execution_status: "pending", replacement_name: null, salad_execution_status: "pending", beverage_execution_status: "pending" })),
