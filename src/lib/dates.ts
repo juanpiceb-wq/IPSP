@@ -1,5 +1,26 @@
 import type { Weekday } from "./types";
 
+export const OPERATING_TIME_ZONE = "America/Guayaquil";
+
+/** Fecha calendario operativa de IPSP en Ecuador (YYYY-MM-DD). */
+export function operatingISODate(date: Date = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: OPERATING_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const year = parts.find((p) => p.type === "year")?.value ?? "0000";
+  const month = parts.find((p) => p.type === "month")?.value ?? "00";
+  const day = parts.find((p) => p.type === "day")?.value ?? "00";
+  return `${year}-${month}-${day}`;
+}
+
+/** Compara fechas de negocio sin depender de la zona horaria de Vercel o del navegador. */
+export function hasDateStarted(iso: string | null | undefined, now: Date = new Date()): boolean {
+  return !!iso && operatingISODate(now) >= iso;
+}
+
 /** Lunes de la semana ISO indicada. */
 export function isoWeekMonday(year: number, week: number): Date {
   const simple = new Date(Date.UTC(year, 0, 1 + (week - 1) * 7));
@@ -9,8 +30,10 @@ export function isoWeekMonday(year: number, week: number): Date {
   return monday;
 }
 
+/** Semana ISO según la fecha calendario operativa de Ecuador. */
 export function isoWeekOf(date: Date): { year: number; week: number } {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const [year, month, day] = operatingISODate(date).split("-").map(Number);
+  const d = new Date(Date.UTC(year, month - 1, day));
   const dayNum = d.getUTCDay() || 7;
   d.setUTCDate(d.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
