@@ -111,8 +111,8 @@ export function validateMenu(input:ValidateInput):ValidationResult {
   if(maxDailyDifficulty<=RULES.MAX_DAILY_DIFFICULTY)issues.push({level:"ok",rule:"dificultad-dia",message:`Ningún día supera dificultad ${RULES.MAX_DAILY_DIFFICULTY}.`});
 
   const basePairs:{leftDay:Weekday;rightDay:Weekday;base:string}[]=[];
-  for(let p=0;p<order.length-1;p++){
-    const leftDay=order[p],rightDay=order[p+1];
+  for(let p=0;p<order.length;p++){
+    const leftDay=order[p],rightDay=order[(p+1)%order.length];
     const left=new Set(mains.filter(i=>i.weekday===leftDay&&i.recipe_id).map(i=>ctx.recipesById.get(i.recipe_id!)?.base_ingredient).filter((b):b is string=>isMeaningfulBase(b)));
     const right=new Set(mains.filter(i=>i.weekday===rightDay&&i.recipe_id).map(i=>ctx.recipesById.get(i.recipe_id!)?.base_ingredient).filter((b):b is string=>isMeaningfulBase(b)));
     for(const base of left)if(right.has(base))basePairs.push({leftDay,rightDay,base});
@@ -172,8 +172,24 @@ function validateProteinGap(items:MenuItem[],proteins:Map<string,{name:string}>,
   const byProtein=new Map<string,Set<Weekday>>();
   for(const it of items){if(!it.recipe_id||!it.protein_id)continue;const set=byProtein.get(it.protein_id)??new Set<Weekday>();set.add(it.weekday);byProtein.set(it.protein_id,set);}
   let violations=0;
-  for(const [pid,daysSet] of byProtein){if(pid==="huevo")continue;const days=[...daysSet].sort((a,b)=>(cyclePos.get(a)??0)-(cyclePos.get(b)??0));for(let i=1;i<days.length;i++){const prev=days[i-1],curr=days[i];if((cyclePos.get(curr)??0)-(cyclePos.get(prev)??0)<=RULES.MIN_PROTEIN_GAP_DAYS){violations++;issues.push({level:"error",rule:"proteina-consecutiva",message:`${WEEKDAYS[prev].label} → ${WEEKDAYS[curr].label}: ${proteins.get(pid)?.name??pid} requiere al menos 1 día completo de por medio${scope==="soup"?" entre sopas":""}.`,weekday:curr});}}}
-  if(!violations&&scope==="main")issues.push({level:"ok",rule:"proteina-consecutiva",message:"Las proteínas de platos fuertes respetan su separación mínima; Huevo conserva su excepción."});
+  for(const [pid,daysSet] of byProtein){
+    if(pid==="huevo")continue;
+    const days=[...daysSet];
+    for(let i=0;i<days.length;i++){
+      for(let j=i+1;j<days.length;j++){
+        const a=days[i],b=days[j];
+        const pa=cyclePos.get(a)??0,pb=cyclePos.get(b)??0;
+        const forward=(pb-pa+7)%7,reverse=(pa-pb+7)%7;
+        const gap=Math.min(forward,reverse);
+        if(gap<=RULES.MIN_PROTEIN_GAP_DAYS){
+          const [prev,curr]=forward<=reverse?[a,b]:[b,a];
+          violations++;
+          issues.push({level:"error",rule:"proteina-consecutiva",message:`${WEEKDAYS[prev].label} → ${WEEKDAYS[curr].label}: ${proteins.get(pid)?.name??pid} requiere al menos 1 día completo de por medio${scope==="soup"?" entre sopas":""}.`,weekday:curr});
+        }
+      }
+    }
+  }
+  if(!violations&&scope==="main")issues.push({level:"ok",rule:"proteina-consecutiva",message:"Las proteínas de platos fuertes respetan su separación mínima, incluyendo el cierre del ciclo; Huevo conserva su excepción."});
 }
 function labelOf(it:MenuItem){if(it.component==="soup")return"sopa";return it.service==="breakfast"?"desayuno":it.service==="lunch"?"almuerzo":"cena";}
 
