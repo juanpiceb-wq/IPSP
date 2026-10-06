@@ -5,14 +5,8 @@ import { useRouter } from "next/navigation";
 import MenuTable, { type CellRef } from "@/components/MenuTable";
 import Modal from "@/components/Modal";
 import RecipePicker from "@/components/RecipePicker";
-import {
-  actionGenerate,
-  actionGenerateBulk,
-  actionSaveBulkMenus,
-  actionSaveMenu,
-  actionValidate,
-  actionValidateBulk,
-} from "@/app/actions";
+import { actionValidate, actionValidateBulk } from "@/app/actions";
+import { actionGenerateShared, actionGenerateBulkShared, actionSaveSharedMenu, actionSaveBulkSharedMenus } from "@/app/sharedMenuActions";
 import { parityOfWeek } from "@/lib/rules";
 import { cycleDates, formatDate } from "@/lib/dates";
 import { exportMenuPdf } from "@/lib/exportMenuPdf";
@@ -70,10 +64,10 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
         if(scope==="zones" && !zoneIds.length) throw new Error("Seleccione al menos una zona.");
         if(bulkMode){
           if(!campIds.length) throw new Error("La selección no tiene campamentos activos.");
-          const res=await actionGenerateBulk({year,week,campIds});
+          const res=await actionGenerateBulkShared({year,week,campIds});
           setItems(res.items);setIssues(res.issues);setMetrics(res.metrics);setCapacityWarning(res.capacityWarning);setSeed(res.seed);setBulkResults(res.campResults);
         }else if(camp){
-          const res=await actionGenerate({year,week,campId:camp.id,diners:camp.diners_default,arrival:camp.reception_weekday_default,locked:keepLocked?items.filter(i=>i.locked):[]});
+          const res=await actionGenerateShared({year,week,campId:camp.id,diners:camp.diners_default,arrival:camp.reception_weekday_default,locked:keepLocked?items.filter(i=>i.locked):[]});
           setItems(res.items);setIssues(res.issues);setMetrics(res.metrics);setCapacityWarning(res.capacityWarning);setSeed(res.seed);setBulkResults([]);
         }
       }catch(e){setMessage(e instanceof Error?e.message:"No se pudo generar el menú.");}
@@ -108,8 +102,8 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
     if(status==="aprobado"&&hasHardErrors){setMessage("El menú contiene errores críticos. Puede guardarlo como borrador, pero debe corregirlos antes de aprobar o exportar.");return;}
     setSaving(true);
     try{
-      if(bulkMode){await actionSaveBulkMenus({year,week,campIds,items,status,seed});router.push("/menus");}
-      else if(camp){const d=cycleDates(year,week,camp.reception_weekday_default);const id=await actionSaveMenu({year,week,campId:camp.id,diners:camp.diners_default,arrival:camp.reception_weekday_default,items,status,notes:null,seed,start:d.start,end:d.end,validationScore:metrics?.complianceScore??0,varietyScore:metrics?.varietyScore??0});router.push(`/menus/${id}`);}
+      if(bulkMode){await actionSaveBulkSharedMenus({year,week,campIds,items,status,seed});router.push("/menus");}
+      else if(camp){const d=cycleDates(year,week,camp.reception_weekday_default);const id=await actionSaveSharedMenu({year,week,campId:camp.id,diners:camp.diners_default,arrival:camp.reception_weekday_default,items,status,notes:null,seed,start:d.start,end:d.end,validationScore:metrics?.complianceScore??0,varietyScore:metrics?.varietyScore??0});router.push(`/menus/${id}`);}
     }catch(e){setMessage(e instanceof Error?e.message:"No se pudo guardar el menú.");}finally{setSaving(false);}
   }
 
@@ -118,6 +112,7 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
   const errorIssues=issues.filter(i=>i.level==="error");
   const warnIssues=issues.filter(i=>i.level==="warn");
   const activeItem=cell?items.find(i=>i.weekday===cell.weekday&&i.service===cell.service&&i.component===cell.component):null;
+  const pdfInput={items,catalog,week,parity,campId:camp?.id??"",campName:bulkMode?bulkLabel:camp?.name,diners:bulkMode?bulkCamps.reduce((sum,c)=>sum+c.diners_default,0):(camp?.diners_default??0),dinersLabel:bulkMode?`${bulkCamps.length} campamentos`:undefined,start:bulkMode?null:dates.start,end:bulkMode?null:dates.end,arrival};
 
   return <div className="space-y-4">
     <section className="surface no-print p-5">
@@ -136,73 +131,31 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
               {activeCamps.map(c=><option key={c.id} value={c.id}>{c.name} · víveres {WEEKDAYS[c.reception_weekday_default].label}</option>)}
             </select>
           :scope==="camps"?
-            <div className="rounded-lg border border-line bg-white p-2">
-              <div className="grid gap-1 sm:grid-cols-2">
-                {activeCamps.map(campOption=>{
-                  const selected=campIdsSelected.includes(campOption.id);
-                  return <label key={campOption.id} className="flex items-center gap-2 rounded-md px-2 py-2 text-sm">
-                    <input type="checkbox" checked={selected} onChange={()=>{
-                      setCampIdsSelected(prev=>selected?prev.filter(id=>id!==campOption.id):[...prev,campOption.id]);
-                      setItems([]);setMessage(null);
-                    }}/>
-                    <span className="flex-1">{campOption.name}</span>
-                    <span className="text-[11px] text-muted">{WEEKDAYS[campOption.reception_weekday_default].label}</span>
-                  </label>;
-                })}
-              </div>
-              <p className="mt-2 text-[11px] text-muted">El primer campamento seleccionado define el menú base. Los demás se desplazan automáticamente según su día de recepción.</p>
-            </div>
-          :
-            <div className="rounded-lg border border-line bg-white p-2">
-              <div className="grid gap-1 sm:grid-cols-2">
-                {activeZones.map(z=>{
-                  const selected=zoneIds.includes(z.id);
-                  const camps=zoneCampMap.get(z.id)??[];
-                  const days=Array.from(new Set(camps.map(c=>c.reception_weekday_default))).map(d=>WEEKDAYS[d].short).join(", ");
-                  return <label key={z.id} className="flex items-center gap-2 rounded-md px-2 py-2 text-sm">
-                    <input type="checkbox" checked={selected} onChange={()=>{
-                      setZoneIds(prev=>selected?prev.filter(id=>id!==z.id):[...prev,z.id]);
-                      setItems([]);setMessage(null);
-                    }}/>
-                    <span className="flex-1">{z.name}</span>
-                    <span className="text-[11px] text-muted">{camps.length} camp. · {days||"sin recepción"}</span>
-                  </label>;
-                })}
-              </div>
-              <p className="mt-2 text-[11px] text-muted">Puede combinar zonas aunque reciban víveres en días distintos. Cada campamento recibe el mismo menú desplazado a su calendario.</p>
-            </div>
-          }        </div>
+            <div className="rounded-lg border border-line bg-white p-2"><div className="grid gap-1 sm:grid-cols-2">{activeCamps.map(campOption=>{const selected=campIdsSelected.includes(campOption.id);return <label key={campOption.id} className="flex items-center gap-2 rounded-md px-2 py-2 text-sm"><input type="checkbox" checked={selected} onChange={()=>{setCampIdsSelected(prev=>selected?prev.filter(id=>id!==campOption.id):[...prev,campOption.id]);setItems([]);setMessage(null)}}/><span className="flex-1">{campOption.name}</span><span className="text-[11px] text-muted">{WEEKDAYS[campOption.reception_weekday_default].label}</span></label>})}</div><p className="mt-2 text-[11px] text-muted">Todos reutilizan el mismo menú maestro semanal; solo cambia el calendario según recepción.</p></div>
+          :<div className="rounded-lg border border-line bg-white p-2"><div className="grid gap-1 sm:grid-cols-2">{activeZones.map(z=>{const selected=zoneIds.includes(z.id);const camps=zoneCampMap.get(z.id)??[];const days=Array.from(new Set(camps.map(c=>c.reception_weekday_default))).map(d=>WEEKDAYS[d].short).join(", ");return <label key={z.id} className="flex items-center gap-2 rounded-md px-2 py-2 text-sm"><input type="checkbox" checked={selected} onChange={()=>{setZoneIds(prev=>selected?prev.filter(id=>id!==z.id):[...prev,z.id]);setItems([]);setMessage(null)}}/><span className="flex-1">{z.name}</span><span className="text-[11px] text-muted">{camps.length} camp. · {days||"sin recepción"}</span></label>})}</div><p className="mt-2 text-[11px] text-muted">Una sola secuencia semanal para todos los campamentos.</p></div>}
+        </div>
         <button className="btn-primary h-[42px]" onClick={()=>generate(false)} disabled={pending||(scope==="camp"?!camp:scope==="camps"?!campIdsSelected.length:!zoneIds.length)}>{pending?"Generando…":"Generar menú"}</button>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-4 text-xs">
         <span className={`chip ${parity==="par"?"chip-dark":"chip-info"}`}>SEMANA {parity.toUpperCase()}</span>
         {camp?<><span className="chip-muted">{camp.diners_default} comensales</span><span className="chip-muted">Víveres: {WEEKDAYS[camp.reception_weekday_default].label}</span><span className="text-muted">Uso real: {formatDate(dates.start)} → {formatDate(dates.end)}</span></>:null}
-        {bulkMode&&bulkCamps.length?<><span className="chip-info">{scope==="camps"?"Campamentos":"Zonas"}: {bulkLabel}</span><span className="chip-muted">{bulkCamps.length} campamentos</span><span className="chip-muted">Base: {baseCamp?.name} · víveres {WEEKDAYS[arrival].label}</span><span className="text-muted">Misma secuencia; cada campamento se desplaza automáticamente según su recepción.</span></>:null}
-        {items.length?<div className="ml-auto flex gap-2"><button className="btn-ghost btn-sm" onClick={()=>generate(false)} disabled={pending}>Otra opción</button>{!bulkMode?<button className="btn-ghost btn-sm" onClick={()=>generate(true)} disabled={pending}>Regenerar no bloqueados</button>:null}</div>:null}
+        {bulkMode&&bulkCamps.length?<><span className="chip-info">{scope==="camps"?"Campamentos":"Zonas"}: {bulkLabel}</span><span className="chip-muted">{bulkCamps.length} campamentos</span><span className="text-muted">Mismo menú maestro; cada vista empieza el día posterior a recepción.</span></>:null}
+        {items.length?<div className="ml-auto flex gap-2"><button className="btn-ghost btn-sm" onClick={()=>generate(false)} disabled={pending}>Cargar menú maestro</button>{!bulkMode?<button className="btn-ghost btn-sm" onClick={()=>generate(true)} disabled={pending}>Regenerar no bloqueados</button>:null}</div>:null}
       </div>
-      {bulkMode&&bulkResults.length?<div className="mt-3 flex flex-wrap gap-2 text-[11px]">{bulkResults.map(r=><span key={r.campId} className="chip-muted">{r.campName}: {WEEKDAYS[r.arrival].label}{r.shiftDays?` · ${r.shiftDays>0?"+":""}${r.shiftDays} día${Math.abs(r.shiftDays)===1?"":"s"}`:" · base"}</span>)}</div>:null}
+      {bulkMode&&bulkResults.length?<div className="mt-3 flex flex-wrap gap-2 text-[11px]">{bulkResults.map(r=><span key={r.campId} className="chip-muted">{r.campName}: recepción {WEEKDAYS[r.arrival].label}</span>)}</div>:null}
     </section>
 
     {message?<div className="notice-warn">{message}</div>:null}
 
     {items.length ? <>
-      <section className={`no-print rounded-xl border px-4 py-3 ${errorIssues.length?"border-red-200 bg-red-50":"border-emerald-200 bg-emerald-50"}`}>
-        <div className="flex flex-wrap items-center gap-3">
-          <div className={`status-dot ${errorIssues.length?"bg-red-500":"bg-emerald-500"}`}/>
-          <div className="min-w-0 flex-1"><div className="font-semibold text-navy-900">{errorIssues.length?`${errorIssues.length} regla${errorIssues.length===1?"":"s"} requieren atención`:"Menú válido"}</div><div className="text-xs text-muted">{capacityWarning??(errorIssues.length?errorIssues[0]?.message:"21 platos fuertes · 6 sopas lunes-sábado · mínimo 5 ensaladas")}</div></div>
-          {(errorIssues.length||warnIssues.length)?<details className="text-xs"><summary className="cursor-pointer font-semibold text-corp-700">Ver detalle</summary><div className="mt-2 max-w-2xl space-y-1">{[...errorIssues,...warnIssues].slice(0,12).map((i,n)=><div key={n}>{i.message}</div>)}</div></details>:null}
-        </div>
-      </section>
+      <section className={`no-print rounded-xl border px-4 py-3 ${errorIssues.length?"border-red-200 bg-red-50":"border-emerald-200 bg-emerald-50"}`}><div className="flex flex-wrap items-center gap-3"><div className={`status-dot ${errorIssues.length?"bg-red-500":"bg-emerald-500"}`}/><div className="min-w-0 flex-1"><div className="font-semibold text-navy-900">{errorIssues.length?`${errorIssues.length} regla${errorIssues.length===1?"":"s"} requieren atención`:"Menú válido"}</div><div className="text-xs text-muted">{capacityWarning??(errorIssues.length?errorIssues[0]?.message:"21 platos fuertes · 6 sopas · mínimo 5 ensaladas")}</div></div>{(errorIssues.length||warnIssues.length)?<details className="text-xs"><summary className="cursor-pointer font-semibold text-corp-700">Ver detalle</summary><div className="mt-2 max-w-2xl space-y-1">{[...errorIssues,...warnIssues].slice(0,12).map((i,n)=><div key={n}>{i.message}</div>)}</div></details>:null}</div></section>
 
       <section className="surface p-4 print-full">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div><h2 className="text-lg font-semibold text-navy-900">Semana {week} · {bulkMode?bulkLabel:camp?.name}</h2><p className="text-xs text-muted">Clic en un plato para reemplazarlo. Use el candado para conservarlo al regenerar.</p></div>
-          <div className="no-print flex flex-wrap gap-2"><button className="btn-ghost btn-sm" disabled={exportBlocked} title={exportBlocked?"Corrija los errores críticos antes de exportar.":undefined} onClick={()=>exportMenuPdf({items,catalog,week,parity,campId:camp?.id??"",campName:bulkMode?bulkLabel:camp?.name,diners:bulkMode?bulkCamps.reduce((sum,c)=>sum+c.diners_default,0):(camp?.diners_default??0),dinersLabel:bulkMode?`${bulkCamps.length} campamentos`:undefined,start:bulkMode?null:dates.start,end:bulkMode?null:dates.end})}>PDF</button><button className="btn-ghost btn-sm" disabled={exportBlocked} title={exportBlocked?"Corrija los errores críticos antes de exportar.":undefined} onClick={()=>exportMenuExcel({items,catalog,year,week,campName:bulkMode?bulkLabel||"Zonas":camp?.name??"Campamento",diners:bulkMode?bulkCamps.reduce((sum,c)=>sum+c.diners_default,0):(camp?.diners_default??0),start:bulkMode?null:dates.start,end:bulkMode?null:dates.end})}>Excel</button></div>
-        </div>
-        <MenuTable items={items} catalog={catalog} editable onCell={setCell} onToggleLock={toggleLock}/>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold text-navy-900">Semana {week} · {bulkMode?bulkLabel:camp?.name}</h2><p className="text-xs text-muted">La primera columna es siempre el día siguiente a la recepción de víveres.</p></div><div className="no-print flex flex-wrap gap-2"><button className="btn-ghost btn-sm" disabled={exportBlocked} onClick={()=>exportMenuPdf(pdfInput)}>PDF menú</button><button className="btn-ghost btn-sm" disabled={exportBlocked} onClick={()=>exportMenuPdf({...pdfInput,includeOperationalPortions:true})}>PDF + porciones</button><button className="btn-ghost btn-sm" disabled={exportBlocked} onClick={()=>exportMenuExcel({items,catalog,year,week,campName:bulkMode?bulkLabel||"Zonas":camp?.name??"Campamento",diners:bulkMode?bulkCamps.reduce((sum,c)=>sum+c.diners_default,0):(camp?.diners_default??0),start:bulkMode?null:dates.start,end:bulkMode?null:dates.end})}>Excel</button></div></div>
+        <MenuTable items={items} catalog={catalog} arrival={arrival} editable onCell={setCell} onToggleLock={toggleLock}/>
         <div className="no-print mt-4 flex justify-end gap-2 border-t border-line pt-4"><button className="btn-ghost" onClick={()=>save("borrador")} disabled={saving}>Guardar borrador</button><button className="btn-primary" onClick={()=>save("aprobado")} disabled={saving||exportBlocked}>Guardar y aprobar</button></div>
       </section>
-    </>:<section className="empty-state"><div className="empty-icon">+</div><h2>Genera la planificación de la semana</h2><p>Escoge un campamento, varios campamentos o una o más zonas. Si reciben víveres en días distintos, el sistema desplaza automáticamente la misma secuencia de menú para cada campamento.</p></section>}
+    </>:<section className="empty-state"><div className="empty-icon">+</div><h2>Genera la planificación de la semana</h2><p>La primera generación crea el menú maestro semanal. Las siguientes reutilizan exactamente esa misma secuencia y solo cambian los nombres de los días según la recepción.</p></section>}
 
     <Modal open={!!cell} onClose={()=>setCell(null)} wide title={cell?`${WEEKDAYS[cell.weekday].label} · ${cell.component==="soup"?"Sopa":cell.field==="salad"?"Ensalada":cell.service==="breakfast"?"Desayuno":cell.service==="lunch"?"Almuerzo":"Cena"}`:""} subtitle="Solo se pueden seleccionar preparaciones que cumplan las reglas duras del espacio.">
       {cell?<div className="space-y-4">{cell.field==="recipe"&&activeItem?.reasons?.length?<div className="rounded-xl bg-corp-100 p-3 text-xs text-navy-800"><strong>Selección actual</strong><ul className="mt-1 list-disc pl-5">{activeItem.reasons.map((r,i)=><li key={i}>{r}</li>)}</ul></div>:null}<RecipePicker catalog={catalog} service={cell.field==="salad"?"salad":cell.component==="soup"?"soup":cell.service} weekday={cell.weekday} parity={parity} arrival={arrival} currentId={cell.field==="salad"?activeItem?.salad_recipe_id??null:activeItem?.recipe_id??null} usedRecipeIds={usedRecipeIds} lastUsed={lastUsed} items={items} diners={diners} onPick={pick}/></div>:null}
