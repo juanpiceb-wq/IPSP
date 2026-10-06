@@ -1,4 +1,5 @@
 import { CAMPS, MASTER_INGREDIENTS, PRODUCTS, PROTEINS, RECIPES, historicalMenus } from "../seed/data";
+import { currentProteinOverrides } from "../seed/currentOverrides";
 import type {
   Camp,
   Catalog,
@@ -31,7 +32,7 @@ function store(): Store {
   if (!globalThis.__menuStore) {
     globalThis.__menuStore = {
       ingredients: clone(MASTER_INGREDIENTS),
-      proteins: clone(PROTEINS),
+      proteins: clone(currentProteinOverrides(PROTEINS)),
       products: clone(PRODUCTS),
       recipes: clone(RECIPES),
       camps: clone(CAMPS),
