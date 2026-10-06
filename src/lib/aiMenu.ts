@@ -51,6 +51,43 @@ RECIENTES=${JSON.stringify(recent)}\n${input.currentItems?.length?`MODO REPARACI
   if(!outputText) throw new Error("OpenAI no devolvió un menú estructurado.");
   const parsed=JSON.parse(outputText) as {items:AiChoice[]};const recipeById=new Map(input.catalog.recipes.map(r=>[r.id,r]));
   const items:MenuItem[]=parsed.items.map(x=>{const r=recipeById.get(x.recipe_id);if(!r)throw new Error(`recipe_id inexistente: ${x.recipe_id}`);if(x.salad_recipe_id&&!recipeById.has(x.salad_recipe_id))throw new Error(`salad_recipe_id inexistente: ${x.salad_recipe_id}`);let saladId=x.component==="main"?x.salad_recipe_id:null;if(saladId&&(x.service==="lunch"||x.service==="dinner")){const salad=recipeById.get(saladId);if(!mainAllowsSalad(r)||!salad||!saladAllowedForMain(r,salad))saladId=null;}else saladId=null;return{weekday:x.weekday as Weekday,service:x.service,component:x.component,recipe_id:x.recipe_id,protein_id:r.primary_protein_id,salad_recipe_id:saladId,beverage:x.component==="main"?beverageLabel(x.service,input.parity):null,locked:false,reasons:["Propuesto por IA y verificado por el validador IPSP."],execution_status:"pending",replacement_name:null};});
+  // Cierre determinístico: la IA no puede saltarse las opciones válidas de un espacio.
+  // Si devuelve una receta fuera de la intersección calculada por el motor, se sustituye
+  // por una alternativa válida priorizando una proteína menos usada y evitando repetirla
+  // el mismo día o en días adyacentes.
+  const slotMap=new Map(eligibleBySlot.map(s=>[`${s.weekday}|${s.service}|${s.component}`,s.ids]));
+  const proteinUses=new Map<string,number>();
+  for(const it of items){if(it.protein_id)proteinUses.set(it.protein_id,(proteinUses.get(it.protein_id)??0)+1);}
+  for(const it of items){
+    if(!it.recipe_id)continue;
+    const key=`${it.weekday}|${it.service}|${it.component}`;
+    const allowed=slotMap.get(key);
+    if(!allowed?.length||allowed.includes(it.recipe_id))continue;
+    const candidates=allowed.map(id=>recipeById.get(id)).filter((r):r is NonNullable<typeof r>=>!!r);
+    const score=(r:typeof candidates[number])=>{
+      const pid=r.primary_protein_id;
+      let s=pid?(proteinUses.get(pid)??0)*10:0;
+      if(pid){
+        for(const other of items){
+          if(other===it||other.component!==it.component||other.protein_id!==pid)continue;
+          if(other.weekday===it.weekday)s+=1000;
+          if(Math.abs(other.weekday-it.weekday)===1)s+=500;
+        }
+        const p=input.catalog.proteins.find(x=>x.id===pid);
+        if(p?.target_frequency&&((proteinUses.get(pid)??0)>=p.target_frequency))s+=800;
+      }
+      return s+(r.difficulty??1);
+    };
+    candidates.sort((a,b)=>score(a)-score(b));
+    const replacement=candidates[0];
+    if(!replacement)throw new Error(`No hay receta válida para ${key}.`);
+    if(it.protein_id)proteinUses.set(it.protein_id,Math.max(0,(proteinUses.get(it.protein_id)??1)-1));
+    it.recipe_id=replacement.id;
+    it.protein_id=replacement.primary_protein_id;
+    if(it.protein_id)proteinUses.set(it.protein_id,(proteinUses.get(it.protein_id)??0)+1);
+    it.salad_recipe_id=null;
+    it.reasons=["Ajustado automáticamente por una regla dura del validador IPSP."];
+  }
   const salads=input.catalog.recipes.filter(r=>r.active&&r.services.includes("salad"));
   let saladCount=items.filter(i=>(i.service==="lunch"||i.service==="dinner")&&!!i.salad_recipe_id).length;
   for(const item of items){if(saladCount>=5)break;if(item.component!=="main"||(item.service!=="lunch"&&item.service!=="dinner")||item.salad_recipe_id||!item.recipe_id)continue;const main=recipeById.get(item.recipe_id);if(!main||!mainAllowsSalad(main))continue;const salad=salads.find(s=>saladAllowedForMain(main,s));if(salad){item.salad_recipe_id=salad.id;saladCount++;}}
