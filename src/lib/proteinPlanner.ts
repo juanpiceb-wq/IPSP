@@ -50,6 +50,14 @@ export function buildExactProteinPlan(args:{catalog:Catalog;parity:Parity;arriva
    return false;
  };
  const chickenOnFirstDay=()=>[...assigned.entries()].some(([key,pid])=>pid==="pollo"&&Number(key.split("|")[0])===firstCycleDay);
+ const existingPorkService=(day:Weekday):MainService|null=>{
+   for(const [key,pid] of assigned){
+     const [d,service]=key.split("|");
+     if(Number(d)!==day||pid==="chorizo")continue;
+     if(proteinById.get(pid)?.origin==="cerdo")return service as MainService;
+   }
+   return null;
+ };
  const canPlace=(pid:string,s:{weekday:Weekday;service:MainService})=>{
    if((remaining.get(pid)??0)<=0)return false;
    if(dayProteins.get(s.weekday)?.has(pid))return false;
@@ -58,7 +66,11 @@ export function buildExactProteinPlan(args:{catalog:Catalog;parity:Parity;arriva
    if(pid==="chorizo")return true;
    const n=dayOrigins.get(s.weekday)?.get(protein.origin)??0;
    if(n===0)return true;
-   return protein.origin==="cerdo"&&n===1&&porkExceptionUsed<1;
+   if(protein.origin==="cerdo"&&n===1&&porkExceptionUsed<1){
+     const otherService=existingPorkService(s.weekday);
+     return !!otherService&&new Set([otherService,s.service]).has("breakfast")&&new Set([otherService,s.service]).has("dinner")&&otherService!==s.service;
+   }
+   return false;
  };
  const place=(pid:string,s:{weekday:Weekday;service:MainService})=>{
    assigned.set(`${s.weekday}|${s.service}`,pid);
@@ -112,6 +124,6 @@ export function buildExactProteinPlan(args:{catalog:Catalog;parity:Parity;arriva
    for(const pid of options){place(pid,s);if(feasible()&&solve(i+1))return true;unplace(pid,s);}
    return false;
  };
- if(!solve(0))throw new Error("No existe una distribución válida de las 21 proteínas con las cuotas y reglas actuales, incluyendo Pollo en el primer día posterior a recepción y separación entre días contiguos, incluso al cruzar el cierre del ciclo.");
+ if(!solve(0))throw new Error("No existe una distribución válida de las 21 proteínas con las cuotas y reglas actuales, incluyendo Pollo en el primer día posterior a recepción, separación entre días contiguos y la repetición diaria de cerdo únicamente en desayuno + cena.");
  return [...assigned.entries()].map(([key,proteinId])=>{const [d,s]=key.split("|");return{weekday:Number(d) as Weekday,service:s as MainService,proteinId};});
 }
