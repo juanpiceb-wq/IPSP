@@ -71,7 +71,10 @@ export function validateMenu(input: ValidateInput): ValidationResult {
       continue;
     }
     const service = it.component === "soup" ? "soup" : it.service;
-    const reason = blockingReason(recipe, service, it.weekday, ctx);
+    let reason = blockingReason(recipe, service, it.weekday, ctx);
+    // En menús comunes desplazados, el séptimo día operativo coincide con el día de recepción.
+    // La parrillada dominical conserva su posición en la secuencia aunque cambie el weekday calendario.
+    if (reason && recipe.sunday_roast && service === "dinner" && it.weekday === input.arrival) reason = null;
     if (reason) {
       invalid++;
       issues.push({ level: "error", rule: "restriccion", message: `${WEEKDAYS[it.weekday].label} · ${labelOf(it)}: ${reason}`, weekday: it.weekday, service: it.service });
