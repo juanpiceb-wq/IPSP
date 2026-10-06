@@ -12,7 +12,7 @@ export async function generateMenuWithAI(input:AiMenuInput):Promise<{items:MenuI
  const hist=buildHistoryIndex(input.history,input.year,input.week,input.campId,input.catalog);
  const ctx=buildContext(input.catalog,input.parity,input.arrival,hist);
  const eligibleBySlot:Array<{weekday:number;service:string;component:string;ids:string[]}>=input.eligibleBySlotOverride??[];
- if(!input.eligibleBySlotOverride){for(let d=0;d<7;d++){for(const s of ["breakfast","lunch","dinner"] as MainService[]){eligibleBySlot.push({weekday:d,service:s,component:"main",ids:input.catalog.recipes.filter(r=>r.active&&!r.services.includes("salad")&&!blockingReason(r,s,d as Weekday,ctx)).map(r=>r.id)});}if(d<6)eligibleBySlot.push({weekday:d,service:"lunch",component:"soup",ids:input.catalog.recipes.filter(r=>r.active&&!blockingReason(r,"soup",d as Weekday,ctx)).map(r=>r.id)});}}
+ if(!input.eligibleBySlotOverride){for(let d=0;d<7;d++){for(const s of ["breakfast","lunch","dinner"] as MainService[]){eligibleBySlot.push({weekday:d,service:s,component:"main",ids:input.catalog.recipes.filter(r=>r.active&&!!r.primary_protein_id&&!r.services.includes("salad")&&!blockingReason(r,s,d as Weekday,ctx)).map(r=>r.id)});}if(d<6)eligibleBySlot.push({weekday:d,service:"lunch",component:"soup",ids:input.catalog.recipes.filter(r=>r.active&&!blockingReason(r,"soup",d as Weekday,ctx)).map(r=>r.id)});}}
  const locked=(input.locked??[]).filter(i=>i.locked&&i.recipe_id).map(i=>({weekday:i.weekday,service:i.service,component:i.component,recipe_id:i.recipe_id,salad_recipe_id:i.salad_recipe_id}));
  const prompt=`Planifica el menú semanal IPSP usando EXCLUSIVAMENTE IDs del catálogo.
 Semana ${input.week}/${input.year}, paridad ${input.parity}, recepción weekday=${input.arrival}, comensales=${input.diners}.
@@ -87,6 +87,41 @@ RECIENTES=${JSON.stringify(recent)}\n${input.currentItems?.length?`MODO REPARACI
     if(it.protein_id)proteinUses.set(it.protein_id,(proteinUses.get(it.protein_id)??0)+1);
     it.salad_recipe_id=null;
     it.reasons=["Ajustado automáticamente por una regla dura del validador IPSP."];
+  }
+  // Cierre duro semanal de platos fuertes: 21/21 con proteína y recipe_id único.
+  // La IA puede proponer duplicados; se sustituyen antes de devolver el menú.
+  const usedMainIds=new Set<string>();
+  for(const it of items.filter(x=>x.component==="main")){
+    const current=it.recipe_id?recipeById.get(it.recipe_id):null;
+    const duplicate=!!it.recipe_id&&usedMainIds.has(it.recipe_id);
+    const missingProtein=!current?.primary_protein_id;
+    if(!duplicate&&!missingProtein&&it.recipe_id){usedMainIds.add(it.recipe_id);continue;}
+    const key=`${it.weekday}|${it.service}|main`;
+    const allowed=(slotMap.get(key)??[])
+      .map(id=>recipeById.get(id))
+      .filter((r):r is NonNullable<typeof r>=>!!r&&!!r.primary_protein_id&&!usedMainIds.has(r.id));
+    const score=(r:typeof allowed[number])=>{
+      const pid=r.primary_protein_id!;
+      let s=(proteinUses.get(pid)??0)*10;
+      for(const other of items){
+        if(other===it||other.component!=="main"||other.protein_id!==pid)continue;
+        if(other.weekday===it.weekday)s+=1000;
+        if(Math.abs(other.weekday-it.weekday)===1)s+=500;
+      }
+      const p=input.catalog.proteins.find(x=>x.id===pid);
+      if(p?.target_frequency&&((proteinUses.get(pid)??0)>=p.target_frequency))s+=800;
+      return s+(r.difficulty??1);
+    };
+    allowed.sort((a,b)=>score(a)-score(b));
+    const replacement=allowed[0];
+    if(!replacement)throw new Error(`No hay preparación única con proteína válida para ${key}.`);
+    if(it.protein_id)proteinUses.set(it.protein_id,Math.max(0,(proteinUses.get(it.protein_id)??1)-1));
+    it.recipe_id=replacement.id;
+    it.protein_id=replacement.primary_protein_id;
+    proteinUses.set(it.protein_id!, (proteinUses.get(it.protein_id!)??0)+1);
+    it.salad_recipe_id=null;
+    it.reasons=["Ajustado automáticamente para garantizar plato único y proteína estructurada."];
+    usedMainIds.add(replacement.id);
   }
   const salads=input.catalog.recipes.filter(r=>r.active&&r.services.includes("salad"));
   let saladCount=items.filter(i=>(i.service==="lunch"||i.service==="dinner")&&!!i.salad_recipe_id).length;
