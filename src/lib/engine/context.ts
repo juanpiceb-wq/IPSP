@@ -132,6 +132,8 @@ export function blockingReason(
     return "El almuerzo del domingo está fijado como ceviche de pescado con chifle.";
   if (weekday === 6 && service === "dinner" && !recipe.sunday_roast)
     return "La cena del domingo debe ser una preparación asada habilitada para domingo.";
+  if (recipe.sunday_roast && !(weekday === 6 && service === "dinner"))
+    return "Las preparaciones asadas/parrilladas de domingo solo pueden programarse el domingo en la cena.";
   if (recipe.double_fry && service !== "dinner")
     return "Las preparaciones con doble fritura solo pueden programarse en cena.";
 
