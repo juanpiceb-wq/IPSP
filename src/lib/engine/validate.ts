@@ -237,10 +237,15 @@ export function validateMenu(input: ValidateInput): ValidationResult {
     issues.push({ level: "error", rule: "ensalada-no-aplica", message: `${WEEKDAYS[item.weekday].label}: ${main?.name ?? "El plato"} no lleva ensalada.`, weekday: item.weekday, service: item.service });
   }
   const saladCount = lunchDinner.filter((i) => !!i.salad_recipe_id).length;
+  const saladDays = new Set(lunchDinner.filter((i) => !!i.salad_recipe_id).map((i) => i.weekday)).size;
   if (saladCount < RULES.SALAD_MIN)
     issues.push({ level: "error", rule: "ensaladas", message: `${saladCount}/${RULES.SALAD_SERVICES} servicios con ensalada; se requieren al menos ${RULES.SALAD_MIN}.` });
   else
     issues.push({ level: "ok", rule: "ensaladas", message: `${saladCount}/${RULES.SALAD_SERVICES} servicios con ensalada; cumple el mínimo de ${RULES.SALAD_MIN}.` });
+  if (saladCount >= RULES.SALAD_MIN && saladDays < Math.min(RULES.SALAD_MIN, 4))
+    issues.push({ level: "warn", rule: "ensaladas-distribucion", message: `Las ${saladCount} ensaladas están concentradas en ${saladDays} día(s). Conviene distribuirlas mejor durante la semana cuando la compatibilidad lo permita.` });
+  else if (saladCount >= RULES.SALAD_MIN)
+    issues.push({ level: "ok", rule: "ensaladas-distribucion", message: `Ensaladas distribuidas en ${saladDays} días de la semana.` });
 
   let saladErrors = 0;
   for (const item of lunchDinner) {
