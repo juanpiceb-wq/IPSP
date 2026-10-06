@@ -1,6 +1,7 @@
 "use client";
 
 import { formatDate } from "./dates";
+import { cycleOrder } from "./rules";
 import { WEEKDAYS } from "./types";
 import type { Catalog, MainService, MenuItem, Parity, Weekday } from "./types";
 
@@ -15,6 +16,7 @@ interface ExportMenuPdfInput {
   dinersLabel?: string;
   start: string | null;
   end: string | null;
+  arrival?: Weekday;
   includeOperationalPortions?: boolean;
 }
 
@@ -35,6 +37,27 @@ const GRID: PdfColor = [211, 222, 232];
 const INK: PdfColor = [27, 36, 48];
 const MUTED: PdfColor = [90, 108, 122];
 const WHITE: PdfColor = [255, 255, 255];
+
+const OPERATIONAL_PORTIONS: Record<string,string> = {
+  "atun": "6 latas x 10 pers",
+  "camaron": "No definido",
+  "carne-molida": "100 g x pers",
+  "chorizo": "1 unidad/persona",
+  "chuleta-cerdo": "1 chuleta/persona",
+  "costilla-res": "110 g x pers",
+  "cuero-cerdo": "100 g x pers",
+  "estofado-res": "200 g x pers",
+  "fritada": "220 g x pers",
+  "hamburguesa-res": "1 hamburguesa/persona",
+  "hueso-carnudo": "100 g x pers",
+  "huevo": "2 huevos/persona",
+  "lomo-cerdo": "200 g x pers",
+  "pata-res": "110 g x pers",
+  "pollo": "1 pollo / 10 personas",
+  "sardina": "6 latas x 10 pers",
+  "tilapia": "1 filete/persona (maestro)",
+  "hamburguesa-camaron": "1 unidad/persona",
+};
 
 interface MenuPdfRow {
   kind: "section" | "data";
@@ -59,6 +82,8 @@ export function exportMenuPdf(input: ExportMenuPdfInput) {
 
 export function buildMenuPdf(input: ExportMenuPdfInput): Uint8Array {
   const { items, catalog, week, parity, campId, diners, start, end, includeOperationalPortions = false } = input;
+  const arrival = input.arrival ?? catalog.camps.find((c) => c.id === campId)?.reception_weekday_default ?? 1;
+  const days = cycleOrder(arrival).map((value) => WEEKDAYS.find((d) => d.value === value)!);
   const campName = input.campName ?? catalog.camps.find((c) => c.id === campId)?.name ?? campId;
 
   const recipeName = (id: string | null | undefined) =>
@@ -66,9 +91,7 @@ export function buildMenuPdf(input: ExportMenuPdfInput): Uint8Array {
 
   const portionLabel = (proteinId: string | null | undefined) => {
     if (!proteinId) return null;
-    const protein = catalog.proteins.find((p) => p.id === proteinId);
-    if (!protein) return null;
-    return protein.portion_label || "Porción no definida";
+    return OPERATIONAL_PORTIONS[proteinId] ?? catalog.proteins.find((p) => p.id === proteinId)?.portion_label ?? "No definido";
   };
 
   const find = (w: Weekday, service: MainService, component: "main" | "soup") =>
@@ -79,10 +102,9 @@ export function buildMenuPdf(input: ExportMenuPdfInput): Uint8Array {
     component: "main" | "soup",
     field: "recipe" | "salad" | "beverage"
   ) =>
-    WEEKDAYS.map((d) => {
-      if (service === "lunch" && component === "soup" && d.value === 6) return "No aplica";
+    days.map((d) => {
       const item = find(d.value, service, component);
-      if (!item) return "-";
+      if (!item) return component === "soup" ? "No aplica" : "-";
       if (field === "recipe") {
         const name = recipeName(item.recipe_id) || "-";
         if (!includeOperationalPortions || name === "-") return name;
@@ -121,7 +143,7 @@ export function buildMenuPdf(input: ExportMenuPdfInput): Uint8Array {
   const headerH = 19;
   drawRect(push, MARGIN_X, y, FIRST_COL, headerH, BLUE, BLUE, true);
   drawCellText(push, "SERVICIO", MARGIN_X, y, FIRST_COL, headerH, 7.2, WHITE, true, "center");
-  WEEKDAYS.forEach((d, idx) => {
+  days.forEach((d, idx) => {
     const x = MARGIN_X + FIRST_COL + idx * DAY_COL;
     drawRect(push, x, y, DAY_COL, headerH, BLUE, BLUE, true);
     drawCellText(push, d.label.toUpperCase(), x, y, DAY_COL, headerH, 7.2, WHITE, true, "center");
@@ -158,8 +180,8 @@ export function buildMenuPdf(input: ExportMenuPdfInput): Uint8Array {
   const footerY = PAGE_H - BOTTOM + 2;
   drawLine(push, MARGIN_X, footerY - 9, PAGE_W - MARGIN_X, footerY - 9, GRID, 0.6);
   const footer = includeOperationalPortions
-    ? "Porciones operativas tomadas del maestro vigente de proteínas. Todos los servicios incluyen arroz por defecto, excepto preparaciones con arroz integrado."
-    : "Todos los servicios incluyen arroz por defecto, excepto preparaciones con arroz integrado.";
+    ? "Porciones operativas expresadas exactamente en gramos, unidades, latas o piezas según el maestro vigente."
+    : "La semana operativa inicia el día siguiente a la recepción de víveres.";
   drawText(push, footer, MARGIN_X, footerY, 6.6, MUTED, false);
 
   const streamBytes = encodeWinAnsi(content.join("\n"));
@@ -170,28 +192,23 @@ function drawRect(push: (s: string) => void, x: number, top: number, w: number, 
   const y = PAGE_H - top - h;
   push(`${rgb(fill, false)} ${rgb(stroke, true)} 0.45 w ${n(x)} ${n(y)} ${n(w)} ${n(h)} re ${doFill ? "B" : "S"}`);
 }
-
 function drawLine(push: (s: string) => void, x1: number, top1: number, x2: number, top2: number, color: PdfColor, width: number) {
   push(`${rgb(color, true)} ${n(width)} w ${n(x1)} ${n(PAGE_H - top1)} m ${n(x2)} ${n(PAGE_H - top2)} l S`);
 }
-
 function drawText(push: (s: string) => void, text: string, x: number, topBaseline: number, size: number, color: PdfColor, bold: boolean) {
   push(`BT ${rgb(color, false)} /${bold ? "F2" : "F1"} ${n(size)} Tf 1 0 0 1 ${n(x)} ${n(PAGE_H - topBaseline)} Tm (${pdfEscape(text)}) Tj ET`);
 }
-
 function drawCellText(push: (s: string) => void, text: string, x: number, top: number, w: number, h: number, size: number, color: PdfColor, bold: boolean, align: "left" | "center") {
   const width = approximateTextWidth(text, size, bold);
   const tx = align === "center" ? x + Math.max(3, (w - width) / 2) : x;
   const baselineTop = top + h / 2 + size * 0.34;
   drawText(push, text, tx, baselineTop, size, color, bold);
 }
-
 function drawMultiline(push: (s: string) => void, lines: string[], x: number, top: number, _w: number, h: number, size: number, color: PdfColor, lineH: number) {
   const total = lines.length * lineH;
   const firstBaseline = top + Math.max(size + 3, (h - total) / 2 + size);
   lines.forEach((line, idx) => drawText(push, line, x, firstBaseline + idx * lineH, size, color, false));
 }
-
 function wrapText(text: string, width: number, fontSize: number): string[] {
   const paragraphs = (text || "-").split(/\n+/).map((p) => p.replace(/\s+/g, " ").trim()).filter(Boolean);
   const lines: string[] = [];
@@ -201,94 +218,30 @@ function wrapText(text: string, width: number, fontSize: number): string[] {
     for (const word of words) {
       const trial = current ? `${current} ${word}` : word;
       if (approximateTextWidth(trial, fontSize, false) <= width || !current) current = trial;
-      else {
-        lines.push(current);
-        current = word;
-      }
+      else { lines.push(current); current = word; }
     }
     if (current) lines.push(current);
   }
   return lines.length ? lines : ["-"];
 }
-
 function approximateTextWidth(text: string, fontSize: number, bold: boolean): number {
-  const factor = bold ? 0.54 : 0.5;
-  return text.length * fontSize * factor;
+  return text.length * fontSize * (bold ? 0.54 : 0.5);
 }
-
 function rgb(c: PdfColor, stroke: boolean): string {
   const v = c.map((x) => (x / 255).toFixed(3)).join(" ");
   return `${v} ${stroke ? "RG" : "rg"}`;
 }
-
-function n(v: number): string {
-  return Number(v.toFixed(2)).toString();
-}
-
-function safeFileName(value: string) {
-  return value.replace(/[<>:"/\\|?*\x00-\x1F]/g, "").replace(/\s+/g, " ").trim() || "Menu";
-}
-
-function pdfEscape(text: string): string {
-  return text.replace(/[–—]/g, "-").replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
-}
-
+function n(v: number): string { return Number(v.toFixed(2)).toString(); }
+function safeFileName(value: string) { return value.replace(/[<>:"/\\|?*\x00-\x1F]/g, "").replace(/\s+/g, " ").trim() || "Menu"; }
+function pdfEscape(text: string): string { return text.replace(/[–—]/g, "-").replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)"); }
 function encodeWinAnsi(text: string): Uint8Array {
-  const replacements: Record<number, number> = {
-    0x20ac: 0x80, 0x201a: 0x82, 0x0192: 0x83, 0x201e: 0x84, 0x2026: 0x85, 0x2020: 0x86,
-    0x2021: 0x87, 0x02c6: 0x88, 0x2030: 0x89, 0x0160: 0x8a, 0x2039: 0x8b, 0x0152: 0x8c,
-    0x017d: 0x8e, 0x2018: 0x91, 0x2019: 0x92, 0x201c: 0x93, 0x201d: 0x94, 0x2022: 0x95,
-    0x2013: 0x96, 0x2014: 0x97, 0x02dc: 0x98, 0x2122: 0x99, 0x0161: 0x9a, 0x203a: 0x9b,
-    0x0153: 0x9c, 0x017e: 0x9e, 0x0178: 0x9f,
-  };
-  const out: number[] = [];
-  for (const ch of text) {
-    const code = ch.codePointAt(0) ?? 63;
-    if (code <= 255) out.push(code);
-    else out.push(replacements[code] ?? 63);
-  }
-  return Uint8Array.from(out);
+  const replacements: Record<number, number> = {0x20ac:0x80,0x201a:0x82,0x0192:0x83,0x201e:0x84,0x2026:0x85,0x2020:0x86,0x2021:0x87,0x02c6:0x88,0x2030:0x89,0x0160:0x8a,0x2039:0x8b,0x0152:0x8c,0x017d:0x8e,0x2018:0x91,0x2019:0x92,0x201c:0x93,0x201d:0x94,0x2022:0x95,0x2013:0x96,0x2014:0x97,0x02dc:0x98,0x2122:0x99,0x0161:0x9a,0x203a:0x9b,0x0153:0x9c,0x017e:0x9e,0x0178:0x9f};
+  const out:number[]=[];for(const ch of text){const code=ch.codePointAt(0)??63;if(code<=255)out.push(code);else out.push(replacements[code]??63);}return Uint8Array.from(out);
 }
-
-function ascii(text: string): Uint8Array {
-  return Uint8Array.from(Array.from(text).map((c) => c.charCodeAt(0) & 0xff));
-}
-
-function concat(parts: Uint8Array[]): Uint8Array {
-  const length = parts.reduce((sum, p) => sum + p.length, 0);
-  const out = new Uint8Array(length);
-  let offset = 0;
-  for (const p of parts) {
-    out.set(p, offset);
-    offset += p.length;
-  }
-  return out;
-}
-
+function ascii(text: string): Uint8Array { return Uint8Array.from(Array.from(text).map((c) => c.charCodeAt(0) & 0xff)); }
+function concat(parts: Uint8Array[]): Uint8Array { const length=parts.reduce((sum,p)=>sum+p.length,0);const out=new Uint8Array(length);let offset=0;for(const p of parts){out.set(p,offset);offset+=p.length;}return out; }
 function makePdf(stream: Uint8Array): Uint8Array {
-  const header = Uint8Array.from([...ascii("%PDF-1.4\n").values(), 0x25, 0xe2, 0xe3, 0xcf, 0xd3, 0x0a]);
-  const objects: Uint8Array[] = [];
-  objects[1] = ascii("<< /Type /Catalog /Pages 2 0 R >>");
-  objects[2] = ascii("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
-  objects[3] = ascii(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${n(PAGE_W)} ${n(PAGE_H)}] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>`);
-  objects[4] = ascii("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
-  objects[5] = ascii("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
-  objects[6] = concat([ascii(`<< /Length ${stream.length} >>\nstream\n`), stream, ascii("\nendstream")]);
-
-  const parts: Uint8Array[] = [header];
-  const offsets: number[] = [0];
-  let current = header.length;
-  for (let i = 1; i <= 6; i++) {
-    offsets[i] = current;
-    const wrapped = concat([ascii(`${i} 0 obj\n`), objects[i], ascii("\nendobj\n")]);
-    parts.push(wrapped);
-    current += wrapped.length;
-  }
-
-  const xrefOffset = current;
-  let xref = "xref\n0 7\n0000000000 65535 f \n";
-  for (let i = 1; i <= 6; i++) xref += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
-  xref += `trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
-  parts.push(ascii(xref));
-  return concat(parts);
+  const header=Uint8Array.from([...ascii("%PDF-1.4\n").values(),0x25,0xe2,0xe3,0xcf,0xd3,0x0a]);const objects:Uint8Array[]=[];
+  objects[1]=ascii("<< /Type /Catalog /Pages 2 0 R >>");objects[2]=ascii("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");objects[3]=ascii(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${n(PAGE_W)} ${n(PAGE_H)}] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>`);objects[4]=ascii("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");objects[5]=ascii("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");objects[6]=concat([ascii(`<< /Length ${stream.length} >>\nstream\n`),stream,ascii("\nendstream")]);
+  const parts:Uint8Array[]=[header];const offsets:number[]=[0];let current=header.length;for(let i=1;i<=6;i++){offsets[i]=current;const wrapped=concat([ascii(`${i} 0 obj\n`),objects[i],ascii("\nendobj\n")]);parts.push(wrapped);current+=wrapped.length;}const xrefOffset=current;let xref="xref\n0 7\n0000000000 65535 f \n";for(let i=1;i<=6;i++)xref+=`${String(offsets[i]).padStart(10,"0")} 00000 n \n`;xref+=`trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;parts.push(ascii(xref));return concat(parts);
 }
