@@ -1,5 +1,5 @@
-﻿import type { Catalog, MenuItem, MenuMetrics, Parity, ValidationIssue, Weekday, WeeklyMenu } from "../types";
-import { RULES, allowedBeverages, cycleOrder } from "../rules";
+import type { Catalog, MenuItem, MenuMetrics, Parity, ValidationIssue, Weekday, WeeklyMenu } from "../types";
+import { RULES, allowedBeverages, cycleDistance, cycleOrder } from "../rules";
 import { WEEKDAYS } from "../types";
 import { addConsumption, inventorySummary } from "../supply";
 import { mainAllowsSalad, saladAllowedForMain, saladIngredientViolations } from "../salads";
@@ -91,9 +91,9 @@ export function validateMenu(input:ValidateInput):ValidationResult {
     const dayMains=mains.filter(i=>i.weekday===day.value&&i.protein_id);const seen=new Set<string>();
     for(const it of dayMains){if(seen.has(it.protein_id!))issues.push({level:"error",rule:"proteina-dia",message:`${day.label}: ${ctx.proteinsById.get(it.protein_id!)?.name??it.protein_id} se repite dos veces el mismo día.`,weekday:day.value});seen.add(it.protein_id!);}
   }
-  const order=cycleOrder(input.arrival);const cyclePos=new Map(order.map((d,i)=>[d,i]));
-  validateProteinGap(mains,ctx.proteinsById,cyclePos,issues,"main");
-  validateProteinGap(soups.filter(i=>i.protein_id&&ctx.proteinsById.get(i.protein_id)?.soup_only),ctx.proteinsById,cyclePos,issues,"soup");
+  const order=cycleOrder(input.arrival);
+  validateProteinGap(mains,ctx.proteinsById,input.arrival,issues,"main");
+  validateProteinGap(soups.filter(i=>i.protein_id&&ctx.proteinsById.get(i.protein_id)?.soup_only),ctx.proteinsById,input.arrival,issues,"soup");
 
   // Origen animal solo para platos fuertes; chorizo es neutro. Una excepción semanal de cerdo.
   let porkExceptions=0;
@@ -111,10 +111,11 @@ export function validateMenu(input:ValidateInput):ValidationResult {
   if(maxDailyDifficulty<=RULES.MAX_DAILY_DIFFICULTY)issues.push({level:"ok",rule:"dificultad-dia",message:`Ningún día supera dificultad ${RULES.MAX_DAILY_DIFFICULTY}.`});
 
   const basePairs:{leftDay:Weekday;rightDay:Weekday;base:string}[]=[];
-  for(let p=0;p<order.length;p++){
-    const leftDay=order[p],rightDay=order[(p+1)%order.length];
-    const left=new Set(mains.filter(i=>i.weekday===leftDay&&i.recipe_id).map(i=>ctx.recipesById.get(i.recipe_id!)?.base_ingredient).filter((b):b is string=>isMeaningfulBase(b)));
-    const right=new Set(mains.filter(i=>i.weekday===rightDay&&i.recipe_id).map(i=>ctx.recipesById.get(i.recipe_id!)?.base_ingredient).filter((b):b is string=>isMeaningfulBase(b)));
+  for(let i=0;i<order.length;i++)for(let j=i+1;j<order.length;j++){
+    const leftDay=order[i],rightDay=order[j];
+    if(cycleDistance(leftDay,rightDay,input.arrival)!==1)continue;
+    const left=new Set(mains.filter(item=>item.weekday===leftDay&&item.recipe_id).map(item=>ctx.recipesById.get(item.recipe_id!)?.base_ingredient).filter((b):b is string=>isMeaningfulBase(b)));
+    const right=new Set(mains.filter(item=>item.weekday===rightDay&&item.recipe_id).map(item=>ctx.recipesById.get(item.recipe_id!)?.base_ingredient).filter((b):b is string=>isMeaningfulBase(b)));
     for(const base of left)if(right.has(base))basePairs.push({leftDay,rightDay,base});
   }
   for(const x of basePairs.slice(1))issues.push({level:"error",rule:"base-consecutiva",message:`${WEEKDAYS[x.leftDay].label} → ${WEEKDAYS[x.rightDay].label}: se repite ${x.base}; ya se utilizó la única excepción semanal de base consecutiva.`});
@@ -168,9 +169,10 @@ export function validateMenu(input:ValidateInput):ValidationResult {
   return{issues,metrics,unmetTargets};
 }
 
-function validateProteinGap(items:MenuItem[],proteins:Map<string,{name:string}>,cyclePos:Map<Weekday,number>,issues:ValidationIssue[],scope:"main"|"soup"){
+function validateProteinGap(items:MenuItem[],proteins:Map<string,{name:string}>,arrival:Weekday,issues:ValidationIssue[],scope:"main"|"soup"){
   const byProtein=new Map<string,Set<Weekday>>();
   for(const it of items){if(!it.recipe_id||!it.protein_id)continue;const set=byProtein.get(it.protein_id)??new Set<Weekday>();set.add(it.weekday);byProtein.set(it.protein_id,set);}
+  const order=cycleOrder(arrival);const pos=new Map(order.map((d,i)=>[d,i]));
   let violations=0;
   for(const [pid,daysSet] of byProtein){
     if(pid==="huevo")continue;
@@ -178,10 +180,9 @@ function validateProteinGap(items:MenuItem[],proteins:Map<string,{name:string}>,
     for(let i=0;i<days.length;i++){
       for(let j=i+1;j<days.length;j++){
         const a=days[i],b=days[j];
-        const pa=cyclePos.get(a)??0,pb=cyclePos.get(b)??0;
-        const forward=(pb-pa+7)%7,reverse=(pa-pb+7)%7;
-        const gap=Math.min(forward,reverse);
-        if(gap<=RULES.MIN_PROTEIN_GAP_DAYS){
+        if(cycleDistance(a,b,arrival)<=RULES.MIN_PROTEIN_GAP_DAYS){
+          const pa=pos.get(a)??0,pb=pos.get(b)??0;
+          const forward=(pb-pa+7)%7,reverse=(pa-pb+7)%7;
           const [prev,curr]=forward<=reverse?[a,b]:[b,a];
           violations++;
           issues.push({level:"error",rule:"proteina-consecutiva",message:`${WEEKDAYS[prev].label} → ${WEEKDAYS[curr].label}: ${proteins.get(pid)?.name??pid} requiere al menos 1 día completo de por medio${scope==="soup"?" entre sopas":""}.`,weekday:curr});
