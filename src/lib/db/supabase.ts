@@ -33,8 +33,16 @@ export class SupabaseRepo implements Repo {
     let q=this.db.from("weekly_menus").select("*").order("year",{ascending:false}).order("week_number",{ascending:false});
     if(filters.campId)q=q.eq("camp_id",filters.campId);if(filters.year)q=q.eq("year",filters.year);if(filters.status)q=q.eq("status",filters.status);if(filters.limit)q=q.limit(filters.limit);
     const {data,error}=await q;throwIf(error);const ids=(data??[]).map(m=>m.id);if(!ids.length)return[];
-    const {data:items,error:e2}=await this.db.from("menu_items").select("*").in("weekly_menu_id",ids);throwIf(e2);
-    const byMenu=new Map<string,MenuItem[]>();for(const row of items??[]){const arr=byMenu.get(row.weekly_menu_id)??[];arr.push(rowToItem(row));byMenu.set(row.weekly_menu_id,arr);}
+    const allItems:Record<string,unknown>[]=[];
+    const PAGE_SIZE=1000;
+    for(let from=0;;from+=PAGE_SIZE){
+      const {data:page,error:e2}=await this.db.from("menu_items").select("*").in("weekly_menu_id",ids).order("id",{ascending:true}).range(from,from+PAGE_SIZE-1);
+      throwIf(e2);
+      const rows=(page??[]) as Record<string,unknown>[];
+      allItems.push(...rows);
+      if(rows.length<PAGE_SIZE)break;
+    }
+    const byMenu=new Map<string,MenuItem[]>();for(const row of allItems){const menuId=String(row.weekly_menu_id);const arr=byMenu.get(menuId)??[];arr.push(rowToItem(row));byMenu.set(menuId,arr);}
     return(data??[]).map(m=>({...m as WeeklyMenu,items:byMenu.get(m.id)??[]}));
   }
 
