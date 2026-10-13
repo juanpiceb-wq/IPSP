@@ -22,11 +22,19 @@ export default function MenusClient({menus,catalog,generalAdmin}:{menus:WeeklyMe
     if(!selectedMenus.length)return;
     setExporting(true);
     try{
-      for(let i=0;i<selectedMenus.length;i++){
-        const m=selectedMenus[i];
+      const missing:string[]=[];
+      const ready=selectedMenus.filter(m=>{
+        if(m.items.length)return true;
+        const campName=catalog.camps.find(c=>c.id===m.camp_id)?.name??m.camp_id;
+        missing.push(`${campName} · semana ${m.week_number}`);
+        return false;
+      });
+      for(let i=0;i<ready.length;i++){
+        const m=ready[i];
         exportMenuPdf({items:m.items,catalog,week:m.week_number,parity:m.parity,campId:m.camp_id,diners:m.diners,start:m.actual_start_date,end:m.actual_end_date,arrival:m.supply_arrival_weekday,includeOperationalPortions});
-        if(i<selectedMenus.length-1)await new Promise(resolve=>setTimeout(resolve,180));
+        if(i<ready.length-1)await new Promise(resolve=>setTimeout(resolve,180));
       }
+      if(missing.length)alert(`No se generaron PDFs vacíos. Estos menús no llegaron con items cargados:\n\n${missing.join("\n")}\n\nRecargue la página y vuelva a intentar.`);
     }finally{setExporting(false)}
   }
   return <div className="space-y-3">
