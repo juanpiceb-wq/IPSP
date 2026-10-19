@@ -1,13 +1,14 @@
 "use client";
 
-import { addDays, formatDate, toISODate } from "./dates";
-import { cycleOrder } from "./rules";
-import { WEEKDAYS } from "./types";
+import { formatDate } from "./dates";
+import { buildCalendarWeek, calendarRange } from "./calendarWeek";
+import type { WeekMenuSource } from "./calendarWeek";
 import type { Catalog, MainService, MenuItem, Parity, Weekday } from "./types";
 
 interface ExportMenuPdfInput {
   items: MenuItem[];
   catalog: Catalog;
+  year: number;
   week: number;
   parity: Parity;
   campId: string;
@@ -18,6 +19,8 @@ interface ExportMenuPdfInput {
   end: string | null;
   arrival?: Weekday;
   includeOperationalPortions?: boolean;
+  /** Menú guardado de la semana anterior del mismo campamento (días previos a la recepción). */
+  previous?: WeekMenuSource | null;
 }
 
 type PdfColor = [number, number, number];
@@ -29,18 +32,20 @@ interface MenuPdfRow{kind:"section"|"data";label:string;values?:string[]}
 export function exportMenuPdf(input:ExportMenuPdfInput){const bytes=buildMenuPdf(input);const blob=new Blob([bytes.slice().buffer as ArrayBuffer],{type:"application/pdf"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;const scopeName=input.campName??input.catalog.camps.find(c=>c.id===input.campId)?.name??input.campId;const suffix=input.includeOperationalPortions?" con porciones":"";a.download=`Menu ${safeFileName(scopeName)} Semana ${input.week}${suffix}.pdf`;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url)}
 
 export function buildMenuPdf(input:ExportMenuPdfInput):Uint8Array{
-  const {items,catalog,week,parity,campId,diners,start,end,includeOperationalPortions=false}=input;
+  const {items,catalog,year,week,parity,campId,diners,includeOperationalPortions=false}=input;
   const arrival=input.arrival??catalog.camps.find(c=>c.id===campId)?.reception_weekday_default??1;
-  const days=cycleOrder(arrival).map(value=>WEEKDAYS.find(d=>d.value===value)!);
-  const startDate=start?new Date(`${start}T00:00:00Z`):null;
+  // Semana calendario lunes a domingo; los días previos a la recepción salen del menú de la semana anterior.
+  const days=buildCalendarWeek({year,week,arrival,items},input.previous??null);
+  const range=calendarRange(year,week);
   const campName=input.campName??catalog.camps.find(c=>c.id===campId)?.name??campId;
   const recipeName=(id:string|null|undefined)=>id?catalog.recipes.find(r=>r.id===id)?.name??"":"";
   const proteinName=(proteinId:string|null|undefined)=>proteinId?(catalog.proteins.find(p=>p.id===proteinId)?.name??proteinId):"No definida";
   const portionLabel=(proteinId:string|null|undefined)=>proteinId?(OPERATIONAL_PORTIONS[proteinId]??catalog.proteins.find(p=>p.id===proteinId)?.portion_label??"No definido"):"No definido";
-  const find=(w:Weekday,service:MainService,component:"main"|"soup")=>items.find(i=>i.weekday===w&&i.service===service&&i.component===component);
+  const find=(day:(typeof days)[number],service:MainService,component:"main"|"soup")=>day.items.find(i=>i.service===service&&i.component===component);
   const values=(service:MainService,component:"main"|"soup",field:"recipe"|"salad"|"beverage")=>days.map(d=>{
-    if(component==="soup"&&d.value===6)return"No aplica";
-    const item=find(d.value,service,component);if(!item)return component==="soup"?"-":"-";
+    if(d.source==="none")return"";
+    if(component==="soup"&&d.weekday===6)return"No aplica";
+    const item=find(d,service,component);if(!item)return"-";
     if(field==="recipe"){
       const name=recipeName(item.recipe_id)||"-";
       if(!includeOperationalPortions||name==="-")return name;
@@ -50,12 +55,12 @@ export function buildMenuPdf(input:ExportMenuPdfInput):Uint8Array{
   });
   const rows:MenuPdfRow[]=[{kind:"section",label:"DESAYUNO"},{kind:"data",label:"Plato fuerte",values:values("breakfast","main","recipe")},{kind:"data",label:"Bebida",values:values("breakfast","main","beverage")},{kind:"section",label:"ALMUERZO"},{kind:"data",label:"Sopa",values:values("lunch","soup","recipe")},{kind:"data",label:"Plato fuerte",values:values("lunch","main","recipe")},{kind:"data",label:"Ensalada",values:values("lunch","main","salad")},{kind:"data",label:"Bebida",values:values("lunch","main","beverage")},{kind:"section",label:"CENA"},{kind:"data",label:"Plato fuerte",values:values("dinner","main","recipe")},{kind:"data",label:"Ensalada",values:values("dinner","main","salad")},{kind:"data",label:"Bebida",values:values("dinner","main","beverage")}];
   const content:string[]=[];const push=(s:string)=>content.push(s);const title=includeOperationalPortions?"MENU SEMANAL - PORCIONES OPERATIVAS":"MENU SEMANAL";
-  drawText(push,title,MARGIN_X,TOP,includeOperationalPortions?13:15,NAVY,true);drawText(push,`${campName} - Semana ${week} (${parity.toUpperCase()})`,MARGIN_X,TOP+17,10.5,NAVY,true);const vigencia=start&&end?` | Vigencia: ${formatDate(start)} - ${formatDate(end)}`:"";drawText(push,`${input.dinersLabel??`${diners} comensales`}${vigencia}`,MARGIN_X,TOP+31,8.2,MUTED,false);
+  drawText(push,title,MARGIN_X,TOP,includeOperationalPortions?13:15,NAVY,true);drawText(push,`${campName} - Semana ${week} (${parity.toUpperCase()})`,MARGIN_X,TOP+17,10.5,NAVY,true);const vigencia=` | Semana calendario: ${formatDate(range.start)} - ${formatDate(range.end)}`;drawText(push,`${input.dinersLabel??`${diners} comensales`}${vigencia}`,MARGIN_X,TOP+31,8.2,MUTED,false);
   let y=TOP+43;const headerH=30;drawRect(push,MARGIN_X,y,FIRST_COL,headerH,BLUE,BLUE,true);drawCellText(push,"SERVICIO",MARGIN_X,y,FIRST_COL,headerH,7.2,WHITE,true,"center");
-  days.forEach((d,idx)=>{const x=MARGIN_X+FIRST_COL+idx*DAY_COL;drawRect(push,x,y,DAY_COL,headerH,BLUE,BLUE,true);const date=startDate?formatDate(toISODate(addDays(startDate,idx))):"";drawMultiline(push,[`DÍA ${idx+1}`,d.label.toUpperCase(),date],x+3,y,DAY_COL-6,headerH,6.4,WHITE,7.1)});y+=headerH;
+  days.forEach((d,idx)=>{const x=MARGIN_X+FIRST_COL+idx*DAY_COL;drawRect(push,x,y,DAY_COL,headerH,BLUE,BLUE,true);const tag=d.source==="current"?`DÍA ${d.position}`:d.source==="previous"?`DÍA ${d.position} · SEM ${d.sourceWeek}`:"SIN MENÚ PREVIO";drawMultiline(push,[d.label.toUpperCase(),formatDate(d.date),tag],x+3,y,DAY_COL-6,headerH,6.4,WHITE,7.1)});y+=headerH;
   const bodyFont=includeOperationalPortions?5.9:6.8,lineH=includeOperationalPortions?6.55:7.8;
   for(const row of rows){if(row.kind==="section"){const h=15;drawRect(push,MARGIN_X,y,PAGE_W-MARGIN_X*2,h,NAVY,NAVY,true);drawCellText(push,row.label,MARGIN_X+4,y,PAGE_W-MARGIN_X*2-8,h,7.4,WHITE,true,"left");y+=h;continue}const wrapped=(row.values??[]).map(v=>wrapText(v,DAY_COL-7,bodyFont));const maxLines=Math.max(1,...wrapped.map(w=>w.length));const rowH=Math.max(17,maxLines*lineH+6);drawRect(push,MARGIN_X,y,FIRST_COL,rowH,PALE,GRID,true);drawCellText(push,row.label,MARGIN_X+4,y,FIRST_COL-8,rowH,7,NAVY,true,"left");wrapped.forEach((lines,idx)=>{const x=MARGIN_X+FIRST_COL+idx*DAY_COL;drawRect(push,x,y,DAY_COL,rowH,WHITE,GRID,true);drawMultiline(push,lines,x+3.5,y,DAY_COL-7,rowH,bodyFont,INK,lineH)});y+=rowH}
-  const footerY=PAGE_H-BOTTOM+2;drawLine(push,MARGIN_X,footerY-9,PAGE_W-MARGIN_X,footerY-9,GRID,.6);const footer=includeOperationalPortions?"Cada plato identifica su proteína y la porción operativa exacta en gramos, unidades, latas o piezas. Domingo permanece fijo en el calendario.":"Día 1 inicia después de recepción de víveres. Domingo permanece fijo en el calendario.";drawText(push,footer,MARGIN_X,footerY,6.6,MUTED,false);return makePdf(encodeWinAnsi(content.join("\n")))}
+  const footerY=PAGE_H-BOTTOM+2;drawLine(push,MARGIN_X,footerY-9,PAGE_W-MARGIN_X,footerY-9,GRID,.6);const footer=includeOperationalPortions?"Lunes a domingo. Cada plato identifica su proteína y la porción operativa exacta. Días previos a la recepción: menú de la semana anterior. Domingo fijo.":"Semana de lunes a domingo. Día 1 inicia después de la recepción de víveres; los días previos a la recepción corresponden al menú de la semana anterior. Domingo fijo.";drawText(push,footer,MARGIN_X,footerY,6.6,MUTED,false);return makePdf(encodeWinAnsi(content.join("\n")))}
 function drawRect(push:(s:string)=>void,x:number,top:number,w:number,h:number,fill:PdfColor,stroke:PdfColor,doFill:boolean){const y=PAGE_H-top-h;push(`${rgb(fill,false)} ${rgb(stroke,true)} 0.45 w ${n(x)} ${n(y)} ${n(w)} ${n(h)} re ${doFill?"B":"S"}`)}
 function drawLine(push:(s:string)=>void,x1:number,top1:number,x2:number,top2:number,color:PdfColor,width:number){push(`${rgb(color,true)} ${n(width)} w ${n(x1)} ${n(PAGE_H-top1)} m ${n(x2)} ${n(PAGE_H-top2)} l S`)}
 function drawText(push:(s:string)=>void,text:string,x:number,topBaseline:number,size:number,color:PdfColor,bold:boolean){push(`BT ${rgb(color,false)} /${bold?"F2":"F1"} ${n(size)} Tf 1 0 0 1 ${n(x)} ${n(PAGE_H-topBaseline)} Tm (${pdfEscape(text)}) Tj ET`)}

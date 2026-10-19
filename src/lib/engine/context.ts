@@ -290,7 +290,10 @@ function normalize(value: string) {
 
 function usesGreenPlantain(recipe: Recipe) {
   if (recipe.base_ingredient === "Plátano verde") return true;
-  const text = normalize(`${recipe.name} ${recipe.base_ingredient ?? ""} ${(recipe.main_ingredients ?? []).join(" ")}`);
+  // "Pimiento verde" no es plátano: se excluye para que la regla de verde (días 1-4)
+  // no bloquee platos que solo llevan pimiento.
+  const text = normalize(`${recipe.name} ${recipe.base_ingredient ?? ""} ${(recipe.main_ingredients ?? []).join(" ")}`)
+    .replace(/\bpimientos? verdes?\b/g, "pimiento");
   return /\bverde\b/.test(text)
     || /\bpatacon(?:es)?\b/.test(text)
     || /\bbolon\b/.test(text)

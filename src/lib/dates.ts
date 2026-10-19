@@ -5,7 +5,9 @@ export function isoWeekMonday(year: number, week: number): Date {
   const simple = new Date(Date.UTC(year, 0, 1 + (week - 1) * 7));
   const dow = simple.getUTCDay() || 7; // 1..7 (lunes..domingo)
   const monday = new Date(simple);
-  monday.setUTCDate(simple.getUTCDate() - dow + 1);
+  // Si la fecha base cae de viernes a domingo, la semana ISO empieza el lunes siguiente
+  // (p. ej. 2027 empieza en viernes: la semana 1 arranca el lunes 4 de enero).
+  monday.setUTCDate(dow <= 4 ? simple.getUTCDate() - dow + 1 : simple.getUTCDate() + 8 - dow);
   return monday;
 }
 
