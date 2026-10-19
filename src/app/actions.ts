@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { getRepo, newId, slugify } from "@/lib/db";
 import { generateMenuWithAI } from "@/lib/aiMenu";
 import { validateMenu } from "@/lib/engine/validate";
+import { activeArrivals } from "@/lib/sharedPlanning";
+import { projectSharedItems } from "@/lib/sharedWeek";
 import { cycleDates } from "@/lib/dates";
 import { parityOfWeek, RULES } from "@/lib/rules";
 import { assertCanManageExecution, assertGeneralAdmin } from "@/lib/access";
@@ -19,15 +21,40 @@ export async function actionGenerate(req:GenerateRequest):Promise<GenerateRespon
   const repo=getRepo();const started=Date.now();
   console.log("[generate-ai] start",{campId:req.campId,year:req.year,week:req.week});
   const withTimeout=async<T>(label:string,promise:Promise<T>,ms=8000):Promise<T>=>{let timer:ReturnType<typeof setTimeout>|undefined;try{return await Promise.race([promise,new Promise<T>((_,reject)=>{timer=setTimeout(()=>reject(new Error(`${label} excedió ${ms} ms`)),ms);})]);}finally{if(timer)clearTimeout(timer);}};
-  const [catalog,history]=await Promise.all([withTimeout("Catálogo",repo.getCatalog()),withTimeout("Historial",repo.listMenus({campId:req.campId,limit:RULES.HISTORY_WEEKS+2}))]);
+  const catalog=await withTimeout("Catálogo",repo.getCatalog());
+  const history=await withTimeout("Historial",repo.listMenus({limit:(RULES.HISTORY_WEEKS+2)*Math.max(1,catalog.camps.length)}));
   const parity=parityOfWeek(req.week);
-  const ai=await generateMenuWithAI({year:req.year,week:req.week,parity,campId:req.campId,diners:req.diners,arrival:req.arrival,catalog,history,locked:req.locked});
-  const validation=validateMenu({items:ai.items,catalog,parity,arrival:req.arrival,year:req.year,week:req.week,campId:req.campId,diners:req.diners,history});
-  const hard=validation.issues.filter(i=>i.level==="error");
+  const arrivals=activeArrivals(catalog);
+  const base={year:req.year,week:req.week,parity,campId:req.campId,diners:req.diners,arrival:req.arrival,catalog,history,locked:req.locked,arrivals};
+  let ai=await generateMenuWithAI(base);
+  let shared=validateAllArrivals(ai.items,req,catalog,history,arrivals);
+  // Un intento de reparación con la IA si alguna recepción (o el cruce de semana) incumple.
+  if(shared.hard.length&&Date.now()-started<55000){
+    console.log("[generate-ai] repair",{issues:shared.hard.map(i=>i.rule)});
+    ai=await generateMenuWithAI({...base,currentItems:ai.items,repairIssues:shared.hard.map(i=>i.message)});
+    shared=validateAllArrivals(ai.items,req,catalog,history,arrivals);
+  }
+  const validation=shared.primary;
+  const hard=shared.hard;
   console.log("[generate-ai] validation-ready",{totalMs:Date.now()-started,errors:hard.length,issues:hard.map(i=>i.rule)});
   if(hard.length)throw new Error(`El cierre determinístico detectó ${hard.length} regla(s) dura(s): ${hard.slice(0,3).map(i=>i.message).join(" · ")}`);
   const {start,end}=cycleDates(req.year,req.week,req.arrival);
   return{items:ai.items,seed:ai.seed,issues:validation.issues,metrics:validation.metrics,capacityWarning:null,start,end};
+}
+
+/** Valida el menú maestro proyectado a cada día de recepción activo (un campamento por recepción). */
+function validateAllArrivals(items:MenuItem[],req:GenerateRequest,catalog:Awaited<ReturnType<ReturnType<typeof getRepo>["getCatalog"]>>,history:WeeklyMenu[],arrivals:Weekday[]){
+  const parity=parityOfWeek(req.week);
+  const primary=validateMenu({items,catalog,parity,arrival:req.arrival,year:req.year,week:req.week,campId:req.campId,diners:req.diners,history});
+  const hard=primary.issues.filter(i=>i.level==="error");
+  for(const arrival of arrivals){
+    if(arrival===req.arrival)continue;
+    const camp=catalog.camps.find(c=>c.active&&c.reception_weekday_default===arrival);
+    if(!camp)continue;
+    const v=validateMenu({items:projectSharedItems(items,req.arrival,arrival),catalog,parity,arrival,year:req.year,week:req.week,campId:camp.id,diners:camp.diners_default,history});
+    for(const issue of v.issues.filter(i=>i.level==="error"))hard.push({...issue,message:`${camp.name} (recepción ${["lunes","martes","miércoles","jueves","viernes","sábado","domingo"][arrival]}): ${issue.message}`});
+  }
+  return{primary,hard};
 }
 
 export interface BulkCampResult { campId:string; campName:string; diners:number; arrival:Weekday; shiftDays:number; errors:number; warnings:number; varietyScore:number; }
@@ -43,7 +70,7 @@ export async function actionGenerateBulk(req:{year:number;week:number;campIds:st
   if(!camps.length)throw new Error("Seleccione al menos un campamento activo.");
   const base=camps[0],parity=parityOfWeek(req.week);
   console.log("[generate-ai-bulk] start",{camps:camps.length,year:req.year,week:req.week,baseArrival:base.reception_weekday_default});
-  const ai=await generateMenuWithAI({year:req.year,week:req.week,parity,campId:base.id,diners:base.diners_default,arrival:base.reception_weekday_default,catalog,history});
+  const ai=await generateMenuWithAI({year:req.year,week:req.week,parity,campId:base.id,diners:base.diners_default,arrival:base.reception_weekday_default,catalog,history,arrivals:activeArrivals(catalog)});
   const campResults:BulkCampResult[]=[];const hardMessages=new Set<string>();
   for(const camp of camps){
     const shiftDays=weekdayShift(base.reception_weekday_default,camp.reception_weekday_default);

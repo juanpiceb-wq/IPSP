@@ -32,9 +32,13 @@ export default async function ReglasPage(){
         <li>El almuerzo del domingo es Ceviche de pescado con chifle. La cena del domingo debe ser asada; las preparaciones marcadas como asado dominical no se usan otro día.</li>
         <li>Plátano verde solo en los primeros {RULES.GREEN_PLANTAIN_DAYS} días del ciclo; maduro desde el día {RULES.GREEN_PLANTAIN_DAYS+1}. El chifle dominical conserva su excepción operativa.</li>
         <li>La dificultad de desayuno + almuerzo + cena no supera {RULES.MAX_DAILY_DIFFICULTY} por día.</li>
-        <li>Se permite una sola coincidencia semanal de ingrediente base dominante entre días consecutivos.</li>
+        <li>Se permite una sola coincidencia semanal de ingrediente base dominante entre días consecutivos. Las preparaciones fijas (ceviche con chifle del domingo) no cuentan.</li>
+        <li>La misma preparación (cazuela, ceviche, tallarín, tigrillo, chaulafán, crema, etc.) no se repite el mismo día ni en días seguidos, aunque cambie la proteína.</li>
         <li>No se repite la misma salsa el mismo día ni en días consecutivos.</li>
         <li>Al menos {RULES.SALAD_MIN} de {RULES.SALAD_SERVICES} almuerzos/cenas llevan ensalada compatible.</li>
+        <li>El menú semanal es único para todas las zonas: cada regla se cumple con todos los días de recepción activos (p. ej. martes y miércoles) a la vez.</li>
+        <li>Entre semanas: la proteína del Día 7 no se repite el Día 1 de la semana siguiente (salvo Huevo) y Pollo no se programa el Día 7, porque el Día 1 siempre lleva Pollo.</li>
+        <li>Variedad: como máximo {RULES.MAX_REPEATS_PREVIOUS_WEEK} platos (fuertes y sopas) repetidos de la semana anterior; el ceviche dominical fijo no cuenta.</li>
       </ul></Block>
       <Block title="Preferencias / información"><ul className="list-disc space-y-1 pl-5">
         <li>La composición de sopas (crema, menestrón, etc.) es una preferencia y nunca invalida por sí sola el menú.</li>

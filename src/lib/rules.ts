@@ -12,6 +12,8 @@ export const RULES = {
   GREEN_PLANTAIN_DAYS: 4,
   MIN_PROTEIN_GAP_DAYS: 1,
   MAX_INGREDIENT_SERVICES_PER_WEEK: 4,
+  /** Máximo de platos (fuertes + sopas) repetidos respecto de la semana anterior; el ceviche dominical fijo no cuenta. */
+  MAX_REPEATS_PREVIOUS_WEEK: 5,
 } as const;
 
 export const SOUP_ONLY_HINT = ["hueso-carnudo", "costilla-res", "pata-res"];
@@ -61,6 +63,36 @@ export function cyclePosition(weekday: Weekday, arrival: Weekday): number {
 export function cycleDistance(dayA: Weekday, dayB: Weekday, arrival: Weekday): number {
   const direct = Math.abs(cyclePosition(dayA, arrival) - cyclePosition(dayB, arrival));
   return Math.min(direct, 7 - direct);
+}
+
+/**
+ * Proyecta un weekday del menú maestro (recepción `source`) al calendario de otra recepción.
+ * Conserva la posición del ciclo (Día 1..7) y solo intercambia el bloque del domingo,
+ * igual que projectSharedItems: el domingo siempre queda en domingo.
+ */
+export function projectWeekday(day: Weekday, source: Weekday, target: Weekday): Weekday {
+  if (source === target) return day;
+  const sourcePos = cyclePosition(day, source);
+  const sourceSunday = cyclePosition(6, source);
+  const targetSunday = cyclePosition(6, target);
+  let targetPos = sourcePos;
+  if (sourcePos === sourceSunday) targetPos = targetSunday;
+  else if (sourcePos === targetSunday) targetPos = sourceSunday;
+  return (((target + targetPos) % 7) as Weekday);
+}
+
+/**
+ * Distancia mínima entre dos días del menú maestro considerando TODAS las recepciones
+ * activas que comparten ese menú. Dos días que quedan contiguos en cualquier campamento
+ * se tratan como contiguos.
+ */
+export function sharedCycleDistance(dayA: Weekday, dayB: Weekday, base: Weekday, arrivals: readonly Weekday[] = []): number {
+  let distance = cycleDistance(dayA, dayB, base);
+  for (const target of arrivals) {
+    if (target === base) continue;
+    distance = Math.min(distance, cycleDistance(projectWeekday(dayA, base, target), projectWeekday(dayB, base, target), target));
+  }
+  return distance;
 }
 
 export function firstUsablePosition(productArrival: Weekday, arrival: Weekday): number {

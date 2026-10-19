@@ -3,8 +3,9 @@ import { RULES, allowedBeverages, cycleDistance, cycleOrder } from "../rules";
 import { WEEKDAYS } from "../types";
 import { addConsumption, inventorySummary } from "../supply";
 import { mainAllowsSalad, saladAllowedForMain, saladIngredientViolations } from "../salads";
-import { blockingReason, buildContext, buildHistoryIndex, isMeaningfulBase, recencyWeight } from "./context";
+import { adjacencyBase, blockingReason, buildContext, buildHistoryIndex, isMeaningfulBase, preparationFamily, recencyWeight } from "./context";
 import { adjacentSauceViolations, hasChickenOnFirstDay, soupCompositionCounts } from "../recipeRules";
+import { lastDayProteins, previousWeekMenu } from "../sharedPlanning";
 
 export interface ValidateInput {
   items:MenuItem[]; catalog:Catalog; parity:Parity; arrival:Weekday; year:number; week:number;
@@ -114,13 +115,25 @@ export function validateMenu(input:ValidateInput):ValidationResult {
   for(let i=0;i<order.length;i++)for(let j=i+1;j<order.length;j++){
     const leftDay=order[i],rightDay=order[j];
     if(cycleDistance(leftDay,rightDay,input.arrival)!==1)continue;
-    const left=new Set(mains.filter(item=>item.weekday===leftDay&&item.recipe_id).map(item=>ctx.recipesById.get(item.recipe_id!)?.base_ingredient).filter((b):b is string=>isMeaningfulBase(b)));
-    const right=new Set(mains.filter(item=>item.weekday===rightDay&&item.recipe_id).map(item=>ctx.recipesById.get(item.recipe_id!)?.base_ingredient).filter((b):b is string=>isMeaningfulBase(b)));
+    const left=new Set(mains.filter(item=>item.weekday===leftDay&&item.recipe_id).map(item=>adjacencyBase(ctx.recipesById.get(item.recipe_id!))).filter((b):b is string=>!!b));
+    const right=new Set(mains.filter(item=>item.weekday===rightDay&&item.recipe_id).map(item=>adjacencyBase(ctx.recipesById.get(item.recipe_id!))).filter((b):b is string=>!!b));
     for(const base of left)if(right.has(base))basePairs.push({leftDay,rightDay,base});
   }
   for(const x of basePairs.slice(1))issues.push({level:"error",rule:"base-consecutiva",message:`${WEEKDAYS[x.leftDay].label} → ${WEEKDAYS[x.rightDay].label}: se repite ${x.base}; ya se utilizó la única excepción semanal de base consecutiva.`});
   if(basePairs.length===0)issues.push({level:"ok",rule:"base-consecutiva",message:"No se repiten bases dominantes en días consecutivos."});
   else if(basePairs.length===1)issues.push({level:"ok",rule:"base-consecutiva",message:`Se utiliza 1/1 excepción semanal de base consecutiva (${basePairs[0].base}).`});
+
+  // Misma preparación (cazuela, ceviche, tallarín, tigrillo…) ni el mismo día ni en días contiguos.
+  const withFamily=items.filter(i=>i.recipe_id).map(i=>({i,r:ctx.recipesById.get(i.recipe_id!)})).map(x=>({...x,f:preparationFamily(x.r)})).filter(x=>!!x.f);
+  let familyIssues=0;const familySeen=new Set<string>();
+  for(let a=0;a<withFamily.length;a++)for(let b=a+1;b<withFamily.length;b++){
+    const A=withFamily[a],B=withFamily[b];
+    if(A.f!==B.f||A.i.recipe_id===B.i.recipe_id)continue;
+    if(cycleDistance(A.i.weekday,B.i.weekday,input.arrival)>1)continue;
+    const sig=[A.i.recipe_id,B.i.recipe_id].sort().join("|");if(familySeen.has(sig))continue;familySeen.add(sig);familyIssues++;
+    issues.push({level:"error",rule:"preparacion-consecutiva",message:`${A.r!.name} (${WEEKDAYS[A.i.weekday].label}) y ${B.r!.name} (${WEEKDAYS[B.i.weekday].label}) son la misma preparación en días seguidos o el mismo día.`,weekday:B.i.weekday});
+  }
+  if(!familyIssues)issues.push({level:"ok",rule:"preparacion-consecutiva",message:"No se repite la misma preparación el mismo día ni en días seguidos."});
 
   // Ensaladas: mínimo 5 duro; distribución e ingredientes secundarios son aviso.
   let saladHardErrors=0;
@@ -157,6 +170,30 @@ export function validateMenu(input:ValidateInput):ValidationResult {
   const ledger=new Map<string,number>();
   for(const it of items){if(!it.recipe_id)continue;const r=ctx.recipesById.get(it.recipe_id);if(r)addConsumption(ledger,r,input.diners);}
   issues.push({level:"ok",rule:"stock",message:"El consumo estimado es informativo y no invalida el menú; las cuotas se controlan por frecuencia exacta de proteína."});
+
+  // Cruce de semana: Día 7 de la semana anterior → Día 1 de esta (mismo campamento).
+  const prevMenu=previousWeekMenu(input.history,input.campId,input.year,input.week);
+  if(prevMenu){
+    const prevLast=lastDayProteins(prevMenu);
+    const firstDay=cycleOrder(input.arrival)[0];
+    let crossIssues=0;
+    for(const scope of ["main","soup"] as const){
+      const before=new Set((scope==="main"?prevLast.mains:prevLast.soups).filter(p=>p!=="huevo"));
+      for(const it of items.filter(i=>i.component===scope&&i.weekday===firstDay&&i.protein_id&&before.has(i.protein_id))){
+        crossIssues++;
+        const name=ctx.proteinsById.get(it.protein_id!)?.name??it.protein_id;
+        issues.push({level:it.protein_id==="pollo"?"warn":"error",rule:"proteina-cruce-semana",message:`${name} se sirvió el último día de la semana ${prevMenu.week_number} y se repite el Día 1 (${WEEKDAYS[firstDay].label}); debe haber un día de por medio.`,weekday:firstDay});
+      }
+    }
+    if(!crossIssues)issues.push({level:"ok",rule:"proteina-cruce-semana",message:`Sin proteína repetida entre el último día de la semana ${prevMenu.week_number} y el Día 1.`});
+    const fixed=new Set([ctx.sundayLunchRecipeId].filter(Boolean));
+    const prevIds=new Set(prevMenu.items.map(i=>i.recipe_id).filter((id):id is string=>!!id&&!fixed.has(id)));
+    const repeated=[...new Set(items.map(i=>i.recipe_id).filter((id):id is string=>!!id&&prevIds.has(id)))];
+    const names=repeated.map(id=>ctx.recipesById.get(id)?.name??id).join(", ");
+    issues.push(repeated.length>RULES.MAX_REPEATS_PREVIOUS_WEEK
+      ?{level:"error",rule:"variedad-semanal",message:`Repite ${repeated.length} platos de la semana ${prevMenu.week_number} (máximo ${RULES.MAX_REPEATS_PREVIOUS_WEEK}): ${names}.`}
+      :{level:"ok",rule:"variedad-semanal",message:`Repite ${repeated.length} de máximo ${RULES.MAX_REPEATS_PREVIOUS_WEEK} platos de la semana ${prevMenu.week_number}${repeated.length?`: ${names}`:""}.`});
+  }
 
   const menuComplete=missingMain.length===0&&duplicateMain.length===0&&missingSoup.length===0&&duplicateSoup.length===0&&!sundaySoups.length&&items.every(i=>!!i.recipe_id);
   const variety=menuComplete?varietyScore(items,ctx.history,ctx.recipesById):0;

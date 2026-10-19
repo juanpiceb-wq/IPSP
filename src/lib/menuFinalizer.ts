@@ -1,6 +1,6 @@
 import type { Catalog, MainService, MenuItem, Parity, Recipe, Weekday } from "./types";
-import { beverageLabel, cycleDistance, cycleOrder, RULES } from "./rules";
-import { isMeaningfulBase } from "./engine/context";
+import { beverageLabel, cycleDistance, cycleOrder, projectWeekday, RULES, sharedCycleDistance } from "./rules";
+import { adjacencyBase, preparationFamily } from "./engine/context";
 import { sauceKey, soupNeedScore } from "./recipeRules";
 import { mainAllowsSalad, saladAllowedForMain } from "./salads";
 import type { ProteinSlot } from "./proteinPlanner";
@@ -16,7 +16,12 @@ export function finalizeMenu(args:{
   catalog:Catalog; parity:Parity; arrival:Weekday; eligibleBySlot:EligibleSlot[];
   proteinPlan:ProteinSlot[]; preferences?:RecipePreference[]; locked?:MenuItem[];
   recencyPenalty?:Record<string,number>;
+  /** Otras recepciones que comparten el menú maestro: las reglas de días contiguos se cumplen en todas. */
+  arrivals?:Weekday[];
+  /** Proteínas de sopa del Día 7 anterior: no se repiten en la sopa del Día 1. */
+  previousLastDaySoupProteins?:string[];
 }):MenuItem[]{
+  const arrivals=args.arrivals??[];
   const recipeById=new Map(args.catalog.recipes.map(r=>[r.id,r]));
   const allowedBySlot=new Map(args.eligibleBySlot.map(s=>[slotKey(s.weekday as Weekday,s.service as MainService,s.component as "main"|"soup"),[...s.ids]]));
   const preferred=new Map<string,string>();
@@ -27,8 +32,8 @@ export function finalizeMenu(args:{
   const locked=new Map((args.locked??[]).filter(x=>x.locked&&x.recipe_id).map(x=>[slotKey(x.weekday,x.service,x.component),x]));
   const recencyPenalty=args.recencyPenalty??{};
 
-  const mains=solveMains(args.catalog,args.arrival,args.parity,args.proteinPlan,allowedBySlot,preferred,locked,recipeById,recencyPenalty);
-  const soups=solveSoups(args.catalog,args.arrival,args.parity,allowedBySlot,preferred,locked,recipeById,new Set(mains.map(x=>x.recipe_id!).filter(Boolean)),recencyPenalty);
+  const mains=solveMains(args.catalog,args.arrival,args.parity,args.proteinPlan,allowedBySlot,preferred,locked,recipeById,recencyPenalty,arrivals);
+  const soups=solveSoups(args.catalog,args.arrival,args.parity,allowedBySlot,preferred,locked,recipeById,new Set(mains.map(x=>x.recipe_id!).filter(Boolean)),recencyPenalty,arrivals,new Set(args.previousLastDaySoupProteins??[]),mains.map(x=>[x.weekday,recipeById.get(x.recipe_id!)!] as [Weekday,Recipe]));
   const items=[...mains,...soups];
   assignSalads(items,args.catalog,args.parity,preferred,locked,recipeById);
   items.sort((a,b)=>a.weekday-b.weekday||serviceOrder(a.service)-serviceOrder(b.service)||(a.component==="soup"?-1:1));
@@ -38,7 +43,7 @@ export function finalizeMenu(args:{
 
 function solveMains(
   catalog:Catalog,arrival:Weekday,parity:Parity,plan:ProteinSlot[],allowedBySlot:Map<string,string[]>,
-  preferred:Map<string,string>,locked:Map<string,MenuItem>,recipeById:Map<string,Recipe>,recencyPenalty:Record<string,number>
+  preferred:Map<string,string>,locked:Map<string,MenuItem>,recipeById:Map<string,Recipe>,recencyPenalty:Record<string,number>,arrivals:Weekday[]=[]
 ){
   const slots=plan.map(p=>{
     const key=slotKey(p.weekday,p.service,"main");
@@ -62,11 +67,18 @@ function solveMains(
       for(const [key,other] of selected){
         if(sauceKey(other)!==sKey)continue;
         const otherDay=Number(key.split("|")[0]) as Weekday;
-        if(cycleDistance(otherDay,slot.weekday,arrival)<=1)return false;
+        if(sharedCycleDistance(otherDay,slot.weekday,arrival,arrivals)<=1)return false;
+      }
+    }
+    const family=preparationFamily(r);
+    if(family){
+      for(const [key,other] of selected){
+        if(preparationFamily(other)!==family)continue;
+        if(sharedCycleDistance(Number(key.split("|")[0]) as Weekday,slot.weekday,arrival,arrivals)<=1)return false;
       }
     }
     const trial=[...selected.entries(),[slot.key,r] as [string,Recipe]];
-    if(baseAdjacencyCount(trial,arrival)>1)return false;
+    if(sharedBaseAdjacencyCount(trial,arrival,arrivals)>1)return false;
     return true;
   };
   const score=(slot:typeof slots[number],r:Recipe)=>{
@@ -102,8 +114,10 @@ function solveMains(
 
 function solveSoups(
   catalog:Catalog,arrival:Weekday,parity:Parity,allowedBySlot:Map<string,string[]>,preferred:Map<string,string>,
-  locked:Map<string,MenuItem>,recipeById:Map<string,Recipe>,usedMain:Set<string>,recencyPenalty:Record<string,number>
+  locked:Map<string,MenuItem>,recipeById:Map<string,Recipe>,usedMain:Set<string>,recencyPenalty:Record<string,number>,
+  arrivals:Weekday[]=[],previousLastDaySoupProteins:Set<string>=new Set(),mainEntries:[Weekday,Recipe][]=[]
 ){
+  const firstCycleDay=cycleOrder(arrival)[0];
   const soupTargets=new Map(catalog.proteins.filter(p=>p.active&&p.soup_only&&p.target_frequency>0&&(p.parity==="todas"||p.parity===parity)).map(p=>[p.id,p.target_frequency]));
   const keys=[0,1,2,3,4,5].map(d=>slotKey(d as Weekday,"lunch","soup"));
   const slots=keys.map(key=>{
@@ -117,11 +131,18 @@ function solveSoups(
     if(used.has(r.id))return false;
     const pid=r.primary_protein_id;
     if(pid&&soupTargets.has(pid)&&(counts.get(pid)??0)>=(soupTargets.get(pid)??0))return false;
+    const family=preparationFamily(r);
+    if(family){
+      const near=(day:Weekday)=>sharedCycleDistance(day,slot.weekday,arrival,arrivals)<=1;
+      if(mainEntries.some(([day,other])=>preparationFamily(other)===family&&near(day)))return false;
+      for(const [key,other] of selected)if(preparationFamily(other)===family&&near(Number(key.split("|")[0]) as Weekday))return false;
+    }
     if(pid){
+      if(slot.weekday===firstCycleDay&&previousLastDaySoupProteins.has(pid))return false;
       for(const [key,other] of selected){
         if(other.primary_protein_id!==pid)continue;
         const otherDay=Number(key.split("|")[0]) as Weekday;
-        if(cycleDistance(otherDay,slot.weekday,arrival)<=RULES.MIN_PROTEIN_GAP_DAYS)return false;
+        if(sharedCycleDistance(otherDay,slot.weekday,arrival,arrivals)<=RULES.MIN_PROTEIN_GAP_DAYS)return false;
       }
     }
     return true;
@@ -191,10 +212,20 @@ function baseAdjacencyCount(entries:[string,Recipe][],arrival:Weekday){
   for(let i=0;i<cycle.length;i++)for(let j=i+1;j<cycle.length;j++){
     const leftDay=cycle[i],rightDay=cycle[j];
     if(cycleDistance(leftDay,rightDay,arrival)!==1)continue;
-    const left=new Set(entries.filter(([k])=>Number(k.split("|")[0])===leftDay).map(([,r])=>r.base_ingredient).filter((b):b is string=>isMeaningfulBase(b)));
-    const right=new Set(entries.filter(([k])=>Number(k.split("|")[0])===rightDay).map(([,r])=>r.base_ingredient).filter((b):b is string=>isMeaningfulBase(b)));
+    const left=new Set(entries.filter(([k])=>Number(k.split("|")[0])===leftDay).map(([,r])=>adjacencyBase(r)).filter((b):b is string=>!!b));
+    const right=new Set(entries.filter(([k])=>Number(k.split("|")[0])===rightDay).map(([,r])=>adjacencyBase(r)).filter((b):b is string=>!!b));
     for(const b of left)if(right.has(b))count++;
   }return count;
+}
+/** Peor caso de coincidencias de base entre días contiguos entre todas las recepciones que comparten el menú. */
+function sharedBaseAdjacencyCount(entries:[string,Recipe][],base:Weekday,arrivals:Weekday[]){
+  let worst=baseAdjacencyCount(entries,base);
+  for(const target of arrivals){
+    if(target===base)continue;
+    const projected=entries.map(([k,r])=>{const [d,...rest]=k.split("|");return [[projectWeekday(Number(d) as Weekday,base,target),...rest].join("|"),r] as [string,Recipe];});
+    worst=Math.max(worst,baseAdjacencyCount(projected,target));
+  }
+  return worst;
 }
 function isChaulafan(r:Recipe){return `${r.id} ${r.name}`.toLocaleLowerCase("es").includes("chaulaf");}
 function makeItem(weekday:Weekday,service:MainService,component:"main"|"soup",r:Recipe,parity:Parity,saladId:string|null,locked:boolean,reason:string):MenuItem{
