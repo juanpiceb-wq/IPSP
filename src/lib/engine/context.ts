@@ -309,6 +309,22 @@ function usesRipePlantain(recipe: Recipe) {
     || /\btajada(?:s)? de maduro\b/.test(text);
 }
 
+/**
+ * Base que cuenta para la regla de días contiguos. Las preparaciones fijas
+ * (p. ej. el ceviche con chifle del domingo) no cuentan.
+ */
+export function adjacencyBase(recipe: Recipe | null | undefined): string | null {
+  if (!recipe || recipe.fixed_weekday != null) return null;
+  return isMeaningfulBase(recipe.base_ingredient) ? recipe.base_ingredient! : null;
+}
+
+/** Familia de preparación (cazuela, ceviche, tallarín, tigrillo…) o null si el nombre es genérico. */
+export function preparationFamily(recipe: Recipe | null | undefined): string | null {
+  if (!recipe) return null;
+  const key = weeklyDishKey(recipe.name);
+  return key.startsWith("family:") ? key.slice(7) : null;
+}
+
 export function isMeaningfulBase(base: string | null | undefined) {
   return !!base && base !== "Sin base dominante" && base !== "Arroz especial";
 }

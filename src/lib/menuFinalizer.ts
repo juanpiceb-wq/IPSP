@@ -1,6 +1,6 @@
 import type { Catalog, MainService, MenuItem, Parity, Recipe, Weekday } from "./types";
 import { beverageLabel, cycleDistance, cycleOrder, projectWeekday, RULES, sharedCycleDistance } from "./rules";
-import { isMeaningfulBase } from "./engine/context";
+import { adjacencyBase, preparationFamily } from "./engine/context";
 import { sauceKey, soupNeedScore } from "./recipeRules";
 import { mainAllowsSalad, saladAllowedForMain } from "./salads";
 import type { ProteinSlot } from "./proteinPlanner";
@@ -33,7 +33,7 @@ export function finalizeMenu(args:{
   const recencyPenalty=args.recencyPenalty??{};
 
   const mains=solveMains(args.catalog,args.arrival,args.parity,args.proteinPlan,allowedBySlot,preferred,locked,recipeById,recencyPenalty,arrivals);
-  const soups=solveSoups(args.catalog,args.arrival,args.parity,allowedBySlot,preferred,locked,recipeById,new Set(mains.map(x=>x.recipe_id!).filter(Boolean)),recencyPenalty,arrivals,new Set(args.previousLastDaySoupProteins??[]));
+  const soups=solveSoups(args.catalog,args.arrival,args.parity,allowedBySlot,preferred,locked,recipeById,new Set(mains.map(x=>x.recipe_id!).filter(Boolean)),recencyPenalty,arrivals,new Set(args.previousLastDaySoupProteins??[]),mains.map(x=>[x.weekday,recipeById.get(x.recipe_id!)!] as [Weekday,Recipe]));
   const items=[...mains,...soups];
   assignSalads(items,args.catalog,args.parity,preferred,locked,recipeById);
   items.sort((a,b)=>a.weekday-b.weekday||serviceOrder(a.service)-serviceOrder(b.service)||(a.component==="soup"?-1:1));
@@ -68,6 +68,13 @@ function solveMains(
         if(sauceKey(other)!==sKey)continue;
         const otherDay=Number(key.split("|")[0]) as Weekday;
         if(sharedCycleDistance(otherDay,slot.weekday,arrival,arrivals)<=1)return false;
+      }
+    }
+    const family=preparationFamily(r);
+    if(family){
+      for(const [key,other] of selected){
+        if(preparationFamily(other)!==family)continue;
+        if(sharedCycleDistance(Number(key.split("|")[0]) as Weekday,slot.weekday,arrival,arrivals)<=1)return false;
       }
     }
     const trial=[...selected.entries(),[slot.key,r] as [string,Recipe]];
@@ -108,7 +115,7 @@ function solveMains(
 function solveSoups(
   catalog:Catalog,arrival:Weekday,parity:Parity,allowedBySlot:Map<string,string[]>,preferred:Map<string,string>,
   locked:Map<string,MenuItem>,recipeById:Map<string,Recipe>,usedMain:Set<string>,recencyPenalty:Record<string,number>,
-  arrivals:Weekday[]=[],previousLastDaySoupProteins:Set<string>=new Set()
+  arrivals:Weekday[]=[],previousLastDaySoupProteins:Set<string>=new Set(),mainEntries:[Weekday,Recipe][]=[]
 ){
   const firstCycleDay=cycleOrder(arrival)[0];
   const soupTargets=new Map(catalog.proteins.filter(p=>p.active&&p.soup_only&&p.target_frequency>0&&(p.parity==="todas"||p.parity===parity)).map(p=>[p.id,p.target_frequency]));
@@ -124,6 +131,12 @@ function solveSoups(
     if(used.has(r.id))return false;
     const pid=r.primary_protein_id;
     if(pid&&soupTargets.has(pid)&&(counts.get(pid)??0)>=(soupTargets.get(pid)??0))return false;
+    const family=preparationFamily(r);
+    if(family){
+      const near=(day:Weekday)=>sharedCycleDistance(day,slot.weekday,arrival,arrivals)<=1;
+      if(mainEntries.some(([day,other])=>preparationFamily(other)===family&&near(day)))return false;
+      for(const [key,other] of selected)if(preparationFamily(other)===family&&near(Number(key.split("|")[0]) as Weekday))return false;
+    }
     if(pid){
       if(slot.weekday===firstCycleDay&&previousLastDaySoupProteins.has(pid))return false;
       for(const [key,other] of selected){
@@ -199,8 +212,8 @@ function baseAdjacencyCount(entries:[string,Recipe][],arrival:Weekday){
   for(let i=0;i<cycle.length;i++)for(let j=i+1;j<cycle.length;j++){
     const leftDay=cycle[i],rightDay=cycle[j];
     if(cycleDistance(leftDay,rightDay,arrival)!==1)continue;
-    const left=new Set(entries.filter(([k])=>Number(k.split("|")[0])===leftDay).map(([,r])=>r.base_ingredient).filter((b):b is string=>isMeaningfulBase(b)));
-    const right=new Set(entries.filter(([k])=>Number(k.split("|")[0])===rightDay).map(([,r])=>r.base_ingredient).filter((b):b is string=>isMeaningfulBase(b)));
+    const left=new Set(entries.filter(([k])=>Number(k.split("|")[0])===leftDay).map(([,r])=>adjacencyBase(r)).filter((b):b is string=>!!b));
+    const right=new Set(entries.filter(([k])=>Number(k.split("|")[0])===rightDay).map(([,r])=>adjacencyBase(r)).filter((b):b is string=>!!b));
     for(const b of left)if(right.has(b))count++;
   }return count;
 }

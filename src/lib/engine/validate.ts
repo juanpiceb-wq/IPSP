@@ -3,7 +3,7 @@ import { RULES, allowedBeverages, cycleDistance, cycleOrder } from "../rules";
 import { WEEKDAYS } from "../types";
 import { addConsumption, inventorySummary } from "../supply";
 import { mainAllowsSalad, saladAllowedForMain, saladIngredientViolations } from "../salads";
-import { blockingReason, buildContext, buildHistoryIndex, isMeaningfulBase, recencyWeight } from "./context";
+import { adjacencyBase, blockingReason, buildContext, buildHistoryIndex, isMeaningfulBase, preparationFamily, recencyWeight } from "./context";
 import { adjacentSauceViolations, hasChickenOnFirstDay, soupCompositionCounts } from "../recipeRules";
 import { lastDayProteins, previousWeekMenu } from "../sharedPlanning";
 
@@ -115,13 +115,25 @@ export function validateMenu(input:ValidateInput):ValidationResult {
   for(let i=0;i<order.length;i++)for(let j=i+1;j<order.length;j++){
     const leftDay=order[i],rightDay=order[j];
     if(cycleDistance(leftDay,rightDay,input.arrival)!==1)continue;
-    const left=new Set(mains.filter(item=>item.weekday===leftDay&&item.recipe_id).map(item=>ctx.recipesById.get(item.recipe_id!)?.base_ingredient).filter((b):b is string=>isMeaningfulBase(b)));
-    const right=new Set(mains.filter(item=>item.weekday===rightDay&&item.recipe_id).map(item=>ctx.recipesById.get(item.recipe_id!)?.base_ingredient).filter((b):b is string=>isMeaningfulBase(b)));
+    const left=new Set(mains.filter(item=>item.weekday===leftDay&&item.recipe_id).map(item=>adjacencyBase(ctx.recipesById.get(item.recipe_id!))).filter((b):b is string=>!!b));
+    const right=new Set(mains.filter(item=>item.weekday===rightDay&&item.recipe_id).map(item=>adjacencyBase(ctx.recipesById.get(item.recipe_id!))).filter((b):b is string=>!!b));
     for(const base of left)if(right.has(base))basePairs.push({leftDay,rightDay,base});
   }
   for(const x of basePairs.slice(1))issues.push({level:"error",rule:"base-consecutiva",message:`${WEEKDAYS[x.leftDay].label} → ${WEEKDAYS[x.rightDay].label}: se repite ${x.base}; ya se utilizó la única excepción semanal de base consecutiva.`});
   if(basePairs.length===0)issues.push({level:"ok",rule:"base-consecutiva",message:"No se repiten bases dominantes en días consecutivos."});
   else if(basePairs.length===1)issues.push({level:"ok",rule:"base-consecutiva",message:`Se utiliza 1/1 excepción semanal de base consecutiva (${basePairs[0].base}).`});
+
+  // Misma preparación (cazuela, ceviche, tallarín, tigrillo…) ni el mismo día ni en días contiguos.
+  const withFamily=items.filter(i=>i.recipe_id).map(i=>({i,r:ctx.recipesById.get(i.recipe_id!)})).map(x=>({...x,f:preparationFamily(x.r)})).filter(x=>!!x.f);
+  let familyIssues=0;const familySeen=new Set<string>();
+  for(let a=0;a<withFamily.length;a++)for(let b=a+1;b<withFamily.length;b++){
+    const A=withFamily[a],B=withFamily[b];
+    if(A.f!==B.f||A.i.recipe_id===B.i.recipe_id)continue;
+    if(cycleDistance(A.i.weekday,B.i.weekday,input.arrival)>1)continue;
+    const sig=[A.i.recipe_id,B.i.recipe_id].sort().join("|");if(familySeen.has(sig))continue;familySeen.add(sig);familyIssues++;
+    issues.push({level:"error",rule:"preparacion-consecutiva",message:`${A.r!.name} (${WEEKDAYS[A.i.weekday].label}) y ${B.r!.name} (${WEEKDAYS[B.i.weekday].label}) son la misma preparación en días seguidos o el mismo día.`,weekday:B.i.weekday});
+  }
+  if(!familyIssues)issues.push({level:"ok",rule:"preparacion-consecutiva",message:"No se repite la misma preparación el mismo día ni en días seguidos."});
 
   // Ensaladas: mínimo 5 duro; distribución e ingredientes secundarios son aviso.
   let saladHardErrors=0;

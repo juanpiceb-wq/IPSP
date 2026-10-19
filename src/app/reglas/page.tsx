@@ -32,7 +32,8 @@ export default async function ReglasPage(){
         <li>El almuerzo del domingo es Ceviche de pescado con chifle. La cena del domingo debe ser asada; las preparaciones marcadas como asado dominical no se usan otro día.</li>
         <li>Plátano verde solo en los primeros {RULES.GREEN_PLANTAIN_DAYS} días del ciclo; maduro desde el día {RULES.GREEN_PLANTAIN_DAYS+1}. El chifle dominical conserva su excepción operativa.</li>
         <li>La dificultad de desayuno + almuerzo + cena no supera {RULES.MAX_DAILY_DIFFICULTY} por día.</li>
-        <li>Se permite una sola coincidencia semanal de ingrediente base dominante entre días consecutivos.</li>
+        <li>Se permite una sola coincidencia semanal de ingrediente base dominante entre días consecutivos. Las preparaciones fijas (ceviche con chifle del domingo) no cuentan.</li>
+        <li>La misma preparación (cazuela, ceviche, tallarín, tigrillo, chaulafán, crema, etc.) no se repite el mismo día ni en días seguidos, aunque cambie la proteína.</li>
         <li>No se repite la misma salsa el mismo día ni en días consecutivos.</li>
         <li>Al menos {RULES.SALAD_MIN} de {RULES.SALAD_SERVICES} almuerzos/cenas llevan ensalada compatible.</li>
         <li>El menú semanal es único para todas las zonas: cada regla se cumple con todos los días de recepción activos (p. ej. martes y miércoles) a la vez.</li>
