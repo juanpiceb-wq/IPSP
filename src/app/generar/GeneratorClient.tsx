@@ -10,14 +10,18 @@ import { actionGenerateShared, actionGenerateBulkShared, actionSaveSharedMenu, a
 import { parityOfWeek } from "@/lib/rules";
 import { cycleDates, formatDate } from "@/lib/dates";
 import { exportMenuPdf } from "@/lib/exportMenuPdf";
-import { exportMenuExcel } from "@/lib/exportMenuExcel";
+import { exportComedorExcel } from "@/lib/exportComedorExcel";
+import type { ComedorBlock } from "@/lib/exportComedorExcel";
+import { previousSource } from "@/lib/zoneBlocks";
+import type { MenuLike } from "@/lib/zoneBlocks";
+import { projectSharedItems } from "@/lib/sharedWeek";
 import { WEEKDAYS } from "@/lib/types";
 import type { BulkCampResult } from "@/app/actions";
 import type { Catalog, MainService, MenuItem, MenuMetrics, MenuStatus, ValidationIssue, Weekday } from "@/lib/types";
 
-interface Props { catalog: Catalog; lastUsed: Record<string,string>; defaults: { year:number; week:number; campId:string } }
+interface Props { catalog: Catalog; lastUsed: Record<string,string>; defaults: { year:number; week:number; campId:string }; history: MenuLike[] }
 
-export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) {
+export default function GeneratorClient({ catalog, lastUsed, defaults, history }: Props) {
   const router = useRouter();
   const [pending,startTransition] = useTransition();
   const [year,setYear] = useState(defaults.year);
@@ -54,6 +58,24 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
   const bulkLabel = scope === "camps" ? selectedMultiCamps.map(c=>c.name).join(" + ") : selectedZones.map(z=>z.name).join(" + ");
 
   const usedRecipeIds = useMemo(()=>items.flatMap(i=>[i.recipe_id,i.salad_recipe_id].filter(Boolean) as string[]),[items]);
+
+  /** Excel COMEDOR: un bloque lunes-domingo por zona de los campamentos seleccionados. */
+  async function exportExcelZones(){
+    const targets = bulkMode ? bulkCamps : camp ? [camp] : [];
+    const groups = new Map<string, typeof targets>();
+    for (const c of targets) { const key = c.zone_id ?? `camp:${c.id}`; groups.set(key, [...(groups.get(key) ?? []), c]); }
+    const blocks: ComedorBlock[] = [...groups.values()].map((cs) => {
+      const ref = [...cs].sort((a,b)=>a.name.localeCompare(b.name))[0];
+      const zone = ref.zone_id ? catalog.zones.find(z=>z.id===ref.zone_id) : undefined;
+      const zoneArrival = ref.reception_weekday_default as Weekday;
+      return {
+        zoneName: zone?.name ?? `${ref.name} (sin zona)`,
+        current: { year, week, arrival: zoneArrival, items: projectSharedItems(items, arrival, zoneArrival) },
+        previous: previousSource(history, { id: "", camp_id: ref.id, year, week_number: week, supply_arrival_weekday: zoneArrival, items: [] }),
+      };
+    }).sort((a,b)=>a.zoneName.localeCompare(b.zoneName));
+    await exportComedorExcel(blocks, catalog);
+  }
 
   function generate(keepLocked:boolean){
     setMessage(null);
@@ -108,7 +130,7 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
   const errorIssues=issues.filter(i=>i.level==="error");
   const warnIssues=issues.filter(i=>i.level==="warn");
   const activeItem=cell?items.find(i=>i.weekday===cell.weekday&&i.service===cell.service&&i.component===cell.component):null;
-  const pdfInput={items,catalog,week,parity,campId:camp?.id??"",campName:bulkMode?bulkLabel:camp?.name,diners:bulkMode?bulkCamps.reduce((sum,c)=>sum+c.diners_default,0):(camp?.diners_default??0),dinersLabel:bulkMode?`${bulkCamps.length} campamentos`:undefined,start:bulkMode?null:dates.start,end:bulkMode?null:dates.end,arrival};
+  const pdfInput={items,catalog,year,previous:baseCamp?previousSource(history,{id:"",camp_id:baseCamp.id,year,week_number:week,supply_arrival_weekday:arrival,items:[]}):null,week,parity,campId:camp?.id??"",campName:bulkMode?bulkLabel:camp?.name,diners:bulkMode?bulkCamps.reduce((sum,c)=>sum+c.diners_default,0):(camp?.diners_default??0),dinersLabel:bulkMode?`${bulkCamps.length} campamentos`:undefined,start:bulkMode?null:dates.start,end:bulkMode?null:dates.end,arrival};
 
   return <div className="space-y-4">
     <section className="surface no-print p-5">
@@ -147,7 +169,7 @@ export default function GeneratorClient({ catalog, lastUsed, defaults }: Props) 
       <section className={`no-print rounded-xl border px-4 py-3 ${errorIssues.length?"border-red-200 bg-red-50":"border-emerald-200 bg-emerald-50"}`}><div className="flex flex-wrap items-center gap-3"><div className={`status-dot ${errorIssues.length?"bg-red-500":"bg-emerald-500"}`}/><div className="min-w-0 flex-1"><div className="font-semibold text-navy-900">{errorIssues.length?`${errorIssues.length} regla${errorIssues.length===1?"":"s"} requieren atención`:"Menú válido"}</div><div className="text-xs text-muted">{capacityWarning??(errorIssues.length?`${errorIssues[0]?.message} Puede aprobarse y exportarse de todas formas.`:"21 platos fuertes · 6 sopas · mínimo 5 ensaladas")}</div></div>{(errorIssues.length||warnIssues.length)?<details className="text-xs"><summary className="cursor-pointer font-semibold text-corp-700">Ver detalle</summary><div className="mt-2 max-w-2xl space-y-1">{[...errorIssues,...warnIssues].slice(0,12).map((i,n)=><div key={n}>{i.message}</div>)}</div></details>:null}</div></section>
 
       <section className="surface p-4 print-full">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold text-navy-900">Semana {week} · {bulkMode?bulkLabel:camp?.name}</h2><p className="text-xs text-muted">Día 1 es el día siguiente a recepción; cada columna muestra su fecha real y domingo no se desplaza.</p></div><div className="no-print flex flex-wrap gap-2"><button className="btn-ghost btn-sm" onClick={()=>exportMenuPdf(pdfInput)}>PDF menú</button><button className="btn-ghost btn-sm" onClick={()=>exportMenuPdf({...pdfInput,includeOperationalPortions:true})}>PDF + porciones</button><button className="btn-ghost btn-sm" onClick={()=>exportMenuExcel({items,catalog,year,week,campName:bulkMode?bulkLabel||"Zonas":camp?.name??"Campamento",diners:bulkMode?bulkCamps.reduce((sum,c)=>sum+c.diners_default,0):(camp?.diners_default??0),start:bulkMode?null:dates.start,end:bulkMode?null:dates.end})}>Excel</button></div></div>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold text-navy-900">Semana {week} · {bulkMode?bulkLabel:camp?.name}</h2><p className="text-xs text-muted">Día 1 es el día siguiente a recepción; cada columna muestra su fecha real y domingo no se desplaza.</p></div><div className="no-print flex flex-wrap gap-2"><button className="btn-ghost btn-sm" onClick={()=>exportMenuPdf(pdfInput)}>PDF menú</button><button className="btn-ghost btn-sm" onClick={()=>exportMenuPdf({...pdfInput,includeOperationalPortions:true})}>PDF + porciones</button><button className="btn-ghost btn-sm" onClick={()=>exportExcelZones()}>Excel</button></div></div>
         <MenuTable items={items} catalog={catalog} arrival={arrival} year={year} week={week} editable onCell={setCell} onToggleLock={toggleLock}/>
         <div className="no-print mt-4 flex justify-end gap-2 border-t border-line pt-4"><button className="btn-ghost" onClick={()=>save("borrador")} disabled={saving}>Guardar borrador</button><button className="btn-primary" onClick={()=>save("aprobado")} disabled={saving}>Guardar y aprobar</button></div>
       </section>
