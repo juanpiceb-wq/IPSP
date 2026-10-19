@@ -1,5 +1,6 @@
 import type { Catalog, MainService, MenuItem, Parity, Weekday } from "./types";
-import { RULES, cycleDistance, cycleOrder } from "./rules";
+import { RULES, cycleOrder, sharedCycleDistance } from "./rules";
+import { makeRng } from "./engine/context";
 
 type EligibleSlot={weekday:number;service:string;component:string;ids:string[]};
 export type ProteinSlot={weekday:Weekday;service:MainService;proteinId:string};
@@ -8,8 +9,21 @@ export type ProteinSlot={weekday:Weekday;service:MainService;proteinId:string};
  * Distribuye primero las 21 cuotas exactas de proteína. Esta fase no elige recetas:
  * solo garantiza la estructura semanal antes de pedir una preparación concreta.
  */
-export function buildExactProteinPlan(args:{catalog:Catalog;parity:Parity;arrival:Weekday;eligibleBySlot:EligibleSlot[];locked?:MenuItem[]}):ProteinSlot[]{
+export function buildExactProteinPlan(args:{
+  catalog:Catalog;parity:Parity;arrival:Weekday;eligibleBySlot:EligibleSlot[];locked?:MenuItem[];
+  /** Otras recepciones que comparten este menú maestro (p. ej. martes y miércoles). */
+  arrivals?:Weekday[];
+  /** Proteínas servidas el último día (Día 7) de la semana anterior: no pueden ir el Día 1. */
+  previousLastDayProteins?:string[];
+  /** Variante del reparto: con semilla se desempatan opciones al azar (reproducible). */
+  seed?:string;
+}):ProteinSlot[]{
+ const rng=args.seed?makeRng(args.seed):null;
+ const tie=new Map<string,number>();
+ const tieKey=(k:string)=>{if(!rng)return 0;if(!tie.has(k))tie.set(k,rng());return tie.get(k)!;};
  const {catalog,parity,arrival,eligibleBySlot}=args;
+ const arrivals=args.arrivals??[];
+ const blockedFirstDay=new Set((args.previousLastDayProteins??[]).filter(p=>p!=="huevo"&&p!=="pollo"));
  const recipeById=new Map(catalog.recipes.map(r=>[r.id,r]));
  const proteinById=new Map(catalog.proteins.map(p=>[p.id,p]));
  const targets=new Map(catalog.proteins
@@ -32,8 +46,9 @@ export function buildExactProteinPlan(args:{catalog:Catalog;parity:Parity;arriva
 
  const cycle=cycleOrder(arrival);
  const firstCycleDay=cycle[0];
+ const lastCycleDay=cycle[6];
  const pos=new Map(cycle.map((d,i)=>[d,i]));
- slots.sort((a,b)=>a.proteins.length-b.proteins.length || (pos.get(a.weekday)??0)-(pos.get(b.weekday)??0));
+ slots.sort((a,b)=>a.proteins.length-b.proteins.length || (pos.get(a.weekday)??0)-(pos.get(b.weekday)??0) || tieKey(`s|${a.weekday}|${a.service}`)-tieKey(`s|${b.weekday}|${b.service}`));
  const remaining=new Map(targets);
  const assigned=new Map<string,string>();
  const dayProteins=new Map<Weekday,Set<string>>();
@@ -45,7 +60,7 @@ export function buildExactProteinPlan(args:{catalog:Catalog;parity:Parity;arriva
    for(const [key,other] of assigned){
      if(other!==pid) continue;
      const otherDay=Number(key.split("|")[0]) as Weekday;
-     if(cycleDistance(otherDay,day,arrival)<=RULES.MIN_PROTEIN_GAP_DAYS) return true;
+     if(sharedCycleDistance(otherDay,day,arrival,arrivals)<=RULES.MIN_PROTEIN_GAP_DAYS) return true;
    }
    return false;
  };
@@ -60,6 +75,10 @@ export function buildExactProteinPlan(args:{catalog:Catalog;parity:Parity;arriva
  };
  const canPlace=(pid:string,s:{weekday:Weekday;service:MainService})=>{
    if((remaining.get(pid)??0)<=0)return false;
+   // Cruce de semana: la proteína del Día 7 anterior no se repite el Día 1.
+   if(s.weekday===firstCycleDay&&blockedFirstDay.has(pid))return false;
+   // El Día 1 siguiente siempre lleva Pollo: no se programa Pollo el Día 7.
+   if(s.weekday===lastCycleDay&&pid==="pollo")return false;
    if(dayProteins.get(s.weekday)?.has(pid))return false;
    if(adjacent(pid,s.weekday))return false;
    const protein=proteinById.get(pid); if(!protein)return false;
@@ -119,7 +138,7 @@ export function buildExactProteinPlan(args:{catalog:Catalog;parity:Parity;arriva
    const options=s.proteins.filter(pid=>canPlace(pid,s)).sort((a,b)=>{
      if(s.weekday===firstCycleDay&&a==="pollo"&&b!=="pollo")return -1;
      if(s.weekday===firstCycleDay&&b==="pollo"&&a!=="pollo")return 1;
-     return (remaining.get(b)??0)-(remaining.get(a)??0);
+     return (remaining.get(b)??0)-(remaining.get(a)??0) || tieKey(`p|${key}|${a}`)-tieKey(`p|${key}|${b}`);
    });
    for(const pid of options){place(pid,s);if(feasible()&&solve(i+1))return true;unplace(pid,s);}
    return false;

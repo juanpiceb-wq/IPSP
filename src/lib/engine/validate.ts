@@ -5,6 +5,7 @@ import { addConsumption, inventorySummary } from "../supply";
 import { mainAllowsSalad, saladAllowedForMain, saladIngredientViolations } from "../salads";
 import { blockingReason, buildContext, buildHistoryIndex, isMeaningfulBase, recencyWeight } from "./context";
 import { adjacentSauceViolations, hasChickenOnFirstDay, soupCompositionCounts } from "../recipeRules";
+import { lastDayProteins, previousWeekMenu } from "../sharedPlanning";
 
 export interface ValidateInput {
   items:MenuItem[]; catalog:Catalog; parity:Parity; arrival:Weekday; year:number; week:number;
@@ -157,6 +158,30 @@ export function validateMenu(input:ValidateInput):ValidationResult {
   const ledger=new Map<string,number>();
   for(const it of items){if(!it.recipe_id)continue;const r=ctx.recipesById.get(it.recipe_id);if(r)addConsumption(ledger,r,input.diners);}
   issues.push({level:"ok",rule:"stock",message:"El consumo estimado es informativo y no invalida el menú; las cuotas se controlan por frecuencia exacta de proteína."});
+
+  // Cruce de semana: Día 7 de la semana anterior → Día 1 de esta (mismo campamento).
+  const prevMenu=previousWeekMenu(input.history,input.campId,input.year,input.week);
+  if(prevMenu){
+    const prevLast=lastDayProteins(prevMenu);
+    const firstDay=cycleOrder(input.arrival)[0];
+    let crossIssues=0;
+    for(const scope of ["main","soup"] as const){
+      const before=new Set((scope==="main"?prevLast.mains:prevLast.soups).filter(p=>p!=="huevo"));
+      for(const it of items.filter(i=>i.component===scope&&i.weekday===firstDay&&i.protein_id&&before.has(i.protein_id))){
+        crossIssues++;
+        const name=ctx.proteinsById.get(it.protein_id!)?.name??it.protein_id;
+        issues.push({level:it.protein_id==="pollo"?"warn":"error",rule:"proteina-cruce-semana",message:`${name} se sirvió el último día de la semana ${prevMenu.week_number} y se repite el Día 1 (${WEEKDAYS[firstDay].label}); debe haber un día de por medio.`,weekday:firstDay});
+      }
+    }
+    if(!crossIssues)issues.push({level:"ok",rule:"proteina-cruce-semana",message:`Sin proteína repetida entre el último día de la semana ${prevMenu.week_number} y el Día 1.`});
+    const fixed=new Set([ctx.sundayLunchRecipeId].filter(Boolean));
+    const prevIds=new Set(prevMenu.items.map(i=>i.recipe_id).filter((id):id is string=>!!id&&!fixed.has(id)));
+    const repeated=[...new Set(items.map(i=>i.recipe_id).filter((id):id is string=>!!id&&prevIds.has(id)))];
+    const names=repeated.map(id=>ctx.recipesById.get(id)?.name??id).join(", ");
+    issues.push(repeated.length>RULES.MAX_REPEATS_PREVIOUS_WEEK
+      ?{level:"error",rule:"variedad-semanal",message:`Repite ${repeated.length} platos de la semana ${prevMenu.week_number} (máximo ${RULES.MAX_REPEATS_PREVIOUS_WEEK}): ${names}.`}
+      :{level:"ok",rule:"variedad-semanal",message:`Repite ${repeated.length} de máximo ${RULES.MAX_REPEATS_PREVIOUS_WEEK} platos de la semana ${prevMenu.week_number}${repeated.length?`: ${names}`:""}.`});
+  }
 
   const menuComplete=missingMain.length===0&&duplicateMain.length===0&&missingSoup.length===0&&duplicateSoup.length===0&&!sundaySoups.length&&items.every(i=>!!i.recipe_id);
   const variety=menuComplete?varietyScore(items,ctx.history,ctx.recipesById):0;

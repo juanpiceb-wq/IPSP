@@ -1,11 +1,10 @@
 import { MemoryRepo } from "../src/lib/db/memory";
 import { SupabaseRepo } from "../src/lib/db/supabase";
-import { blockingReason, buildContext, buildHistoryIndex } from "../src/lib/engine/context";
 import { validateMenu } from "../src/lib/engine/validate";
-import { finalizeMenu, type EligibleSlot } from "../src/lib/menuFinalizer";
-import { buildExactProteinPlan } from "../src/lib/proteinPlanner";
+import { finalizeMenu } from "../src/lib/menuFinalizer";
+import { buildSharedEligibleSlots, lastDayProteins, planFeasibleMenu, previousWeekMenu } from "../src/lib/sharedPlanning";
+import { projectSharedItems } from "../src/lib/sharedWeek";
 import { parityOfWeek } from "../src/lib/rules";
-import type { MainService, Weekday } from "../src/lib/types";
 
 async function main(){
   const url=process.env.SUPABASE_URL??process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -23,24 +22,17 @@ async function main(){
     for(const arrival of arrivals){
       const camp=catalog.camps.find(c=>c.active&&c.reception_weekday_default===arrival)??catalog.camps.find(c=>c.active);
       if(!camp)throw new Error("Smoke: no active camp available.");
-      const hist=buildHistoryIndex(history,2026,week,camp.id,catalog);
-      const ctx=buildContext(catalog,parity,arrival,hist);
-      const eligible:EligibleSlot[]=[];
-      for(let d=0;d<7;d++){
-        for(const service of ["breakfast","lunch","dinner"] as MainService[]){
-          eligible.push({weekday:d,service,component:"main",ids:catalog.recipes.filter(r=>r.active&&!!r.primary_protein_id&&!r.services.includes("salad")&&!blockingReason(r,service,d as Weekday,ctx)).map(r=>r.id)});
-        }
-        if(d<6)eligible.push({weekday:d,service:"lunch",component:"soup",ids:catalog.recipes.filter(r=>r.active&&!blockingReason(r,"soup",d as Weekday,ctx)).map(r=>r.id)});
+      const eligibleAll=buildSharedEligibleSlots({catalog,parity,arrival,arrivals,history,year:2026,week,campId:camp.id});
+      const previous=lastDayProteins(previousWeekMenu(history,camp.id,2026,week));
+      const feasible=planFeasibleMenu({catalog,parity,arrival,arrivals,eligibleBySlot:eligibleAll,previous,seedBase:`smoke-${week}-${arrival}`});
+      const items=finalizeMenu({catalog,parity,arrival,eligibleBySlot:feasible.eligibleBySlot,proteinPlan:feasible.plan,preferences:[],arrivals,previousLastDaySoupProteins:previous.soups});
+      // El menú maestro se valida proyectado a cada recepción activa que lo comparte.
+      for(const target of arrivals){
+        const targetCamp=catalog.camps.find(c=>c.active&&c.reception_weekday_default===target)??camp;
+        const projected=validateMenu({items:projectSharedItems(items,arrival,target),catalog,parity,arrival:target,year:2026,week,campId:targetCamp.id,diners:targetCamp.diners_default,history});
+        const projectedErrors=projected.issues.filter(i=>i.level==="error");
+        if(projectedErrors.length)throw new Error(`Smoke week=${week} base=${arrival} target=${target}: ${projectedErrors.map(e=>`${e.rule}: ${e.message}`).join(" | ")}`);
       }
-      const plan=buildExactProteinPlan({catalog,parity,arrival,eligibleBySlot:eligible});
-      const planMap=new Map(plan.map(x=>[`${x.weekday}|${x.service}`,x.proteinId]));
-      const recipeById=new Map(catalog.recipes.map(r=>[r.id,r]));
-      for(const slot of eligible){
-        if(slot.component!=="main")continue;
-        const pid=planMap.get(`${slot.weekday}|${slot.service}`);
-        slot.ids=slot.ids.filter(id=>recipeById.get(id)?.primary_protein_id===pid);
-      }
-      const items=finalizeMenu({catalog,parity,arrival,eligibleBySlot:eligible,proteinPlan:plan,preferences:[]});
       const result=validateMenu({items,catalog,parity,arrival,year:2026,week,campId:camp.id,diners:camp.diners_default,history});
       const errors=result.issues.filter(i=>i.level==="error");
       if(errors.length)throw new Error(`Smoke week=${week} arrival=${arrival}: ${errors.map(e=>`${e.rule}: ${e.message}`).join(" | ")}`);

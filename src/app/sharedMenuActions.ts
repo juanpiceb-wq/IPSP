@@ -45,7 +45,7 @@ export async function actionGenerateShared(req: GenerateRequest): Promise<Genera
 
 export async function actionGenerateBulkShared(req: { year: number; week: number; campIds: string[]; seed?: string }) {
   const repo = getRepo();
-  const catalog = await repo.getCatalog();
+  const [catalog, history] = await Promise.all([repo.getCatalog(), repo.listMenus({ year: req.year })]);
   const camps = req.campIds.map((id) => catalog.camps.find((c) => c.id === id)).filter((c): c is Camp => !!c && c.active);
   if (!camps.length) throw new Error("Seleccione al menos un campamento activo.");
   const base = camps[0];
@@ -71,7 +71,7 @@ export async function actionGenerateBulkShared(req: { year: number; week: number
       week: req.week,
       campId: camp.id,
       diners: camp.diners_default,
-      history: [],
+      history: history.filter((m) => !(m.year === req.year && m.week_number === req.week)),
     });
     if (camp.id === base.id) { primaryIssues = validation.issues; primaryMetrics = validation.metrics; }
     campResults.push({campId:camp.id,campName:camp.name,diners:camp.diners_default,arrival:camp.reception_weekday_default,shiftDays:0,errors:validation.metrics.errors,warnings:validation.metrics.warnings,varietyScore:validation.metrics.varietyScore});

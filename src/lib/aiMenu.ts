@@ -1,12 +1,15 @@
 import type { Catalog, MainService, MenuItem, Parity, Weekday, WeeklyMenu } from "./types";
-import { blockingReason, buildContext, buildHistoryIndex } from "./engine/context";
-import { buildExactProteinPlan } from "./proteinPlanner";
+import { RULES } from "./rules";
+import { buildContext, buildHistoryIndex } from "./engine/context";
+import { buildSharedEligibleSlots, lastDayProteins, planFeasibleMenu, previousWeekMenu } from "./sharedPlanning";
 import { finalizeMenu, type EligibleSlot, type RecipePreference } from "./menuFinalizer";
 
 interface AiMenuInput {
   year:number; week:number; parity:Parity; campId:string; diners:number; arrival:Weekday;
   catalog:Catalog; history:WeeklyMenu[]; locked?:MenuItem[]; currentItems?:MenuItem[];
   repairIssues?:string[]; eligibleBySlotOverride?:EligibleSlot[];
+  /** Recepciones activas que comparten el menú maestro. */
+  arrivals?:Weekday[];
 }
 interface AiChoice { weekday:number; service:MainService; component:"main"|"soup"; recipe_id:string; salad_recipe_id:string|null; }
 
@@ -32,12 +35,17 @@ export async function generateMenuWithAI(input:AiMenuInput):Promise<{items:MenuI
   const ctx=buildContext(input.catalog,input.parity,input.arrival,hist);
   const eligibleBySlot:EligibleSlot[]=input.eligibleBySlotOverride
     ? input.eligibleBySlotOverride.map(s=>({...s,ids:[...s.ids]}))
-    : buildEligibleSlots(input.catalog,ctx);
+    : buildSharedEligibleSlots({catalog:input.catalog,parity:input.parity,arrival:input.arrival,arrivals:input.arrivals??[],history:input.history,year:input.year,week:input.week,campId:input.campId});
+  void ctx;
+  const previous=lastDayProteins(previousWeekMenu(input.history,input.campId,input.year,input.week));
 
-  const proteinPlan=buildExactProteinPlan({
-    catalog:input.catalog,parity:input.parity,arrival:input.arrival,
-    eligibleBySlot,locked:input.locked,
+  // Reparto de proteínas que sí cierra con preparaciones válidas en todas las recepciones.
+  const feasible=planFeasibleMenu({
+    catalog:input.catalog,parity:input.parity,arrival:input.arrival,arrivals:input.arrivals??[],
+    eligibleBySlot,locked:input.locked,previous,recencyPenalty,seedBase:`${input.year}-${input.week}-${input.campId}`,
   });
+  const proteinPlan=feasible.plan;
+  eligibleBySlot.splice(0,eligibleBySlot.length,...feasible.eligibleBySlot);
   const planMap=new Map(proteinPlan.map(x=>[`${x.weekday}|${x.service}`,x.proteinId]));
   const recipeById=new Map(input.catalog.recipes.map(r=>[r.id,r]));
 
@@ -70,7 +78,8 @@ REGLAS:
 - Para proteína usa solo primary_protein_id; jamás deduzcas proteína por el nombre.
 - La frecuencia target de cada proteína aplicable es EXACTA, ni más ni menos.
 - No repetir la misma receta exacta durante la semana. Distintas preparaciones de una misma familia sí pueden utilizarse.
-- Huevo puede aparecer en días consecutivos; las demás proteínas dejan al menos un día completo de por medio. Chorizo tampoco puede ir en días consecutivos.
+- Huevo puede aparecer en días consecutivos; las demás proteínas dejan al menos un día completo de por medio, también entre el último día de la semana anterior y el primero de esta. Chorizo tampoco puede ir en días consecutivos.
+- El menú lo comparten campamentos con recepción weekday=${JSON.stringify(input.arrivals??[input.arrival])}: las opciones válidas ya contemplan todos.
 - Huevo y Atún solo desayuno. Sardina solo almuerzo salvo Corviche de sardina en desayuno.
 - Pollo debe aparecer el primer día posterior a recepción; esta condición ya está incorporada en PLAN_PROTEINAS.
 - Domingo almuerzo: ceviche fijo. Domingo cena: preparación sunday_roast; sunday_roast no se usa fuera de esa cena.
@@ -82,7 +91,7 @@ REGLAS:
 - Sopas: su composición (crema, menestrón, etc.) es preferencia, no bloqueo.
 - Ensaladas: mínimo 5 compatibles; su distribución es preferencia.
 - Conserva bloqueados.
-- VARIEDAD HISTÓRICA: evita con máxima prioridad las recetas usadas la semana inmediatamente anterior; luego las de hace 2 semanas y reduce gradualmente la penalización hasta 8 semanas. Esto es preferencia, nunca debe romper una regla dura.
+- VARIEDAD HISTÓRICA: como máximo ${RULES.MAX_REPEATS_PREVIOUS_WEEK} preparaciones (fuertes + sopas) pueden repetirse de la semana anterior. Evita con máxima prioridad las recetas usadas la semana inmediatamente anterior; luego las de hace 2 semanas y reduce gradualmente la penalización hasta 8 semanas. Esto es preferencia, nunca debe romper una regla dura.
 - CHAULAFÁN: si eliges una receta cuyo nombre o ID contiene "chaulaf", ubícala idealmente el weekday=${input.arrival} (día de recepción de víveres) o weekday=${previousArrival} (día anterior). Evita ubicar chaulafán en otros días si existe alternativa válida.
 
 PROTEINAS=${JSON.stringify(proteins)}
@@ -111,21 +120,10 @@ ${input.currentItems?.length?`MENÚ_PREVIO=${JSON.stringify(input.currentItems.m
     if(!outputText)throw new Error("OpenAI no devolvió un menú estructurado.");
     const parsed=JSON.parse(outputText) as {items:AiChoice[]};
     const preferences:RecipePreference[]=parsed.items.map(x=>({weekday:x.weekday,service:x.service,component:x.component,recipe_id:x.recipe_id,salad_recipe_id:x.salad_recipe_id}));
-    const items=finalizeMenu({catalog:input.catalog,parity:input.parity,arrival:input.arrival,eligibleBySlot,proteinPlan,preferences,locked:input.locked,recencyPenalty});
+    const items=finalizeMenu({catalog:input.catalog,parity:input.parity,arrival:input.arrival,eligibleBySlot,proteinPlan,preferences,locked:input.locked,recencyPenalty,arrivals:input.arrivals,previousLastDaySoupProteins:previous.soups});
     return{items,seed:`ai-${Date.now()}`};
   }catch(err:any){
     if(err?.name==="AbortError"){console.error("[openai-menu] timeout",{timeoutMs});throw new Error(`OpenAI no respondió en ${timeoutMs/1000} segundos. Intente nuevamente.`);}
     console.error("[openai-menu] error",err instanceof Error?err.message:String(err));throw err;
   }finally{clearTimeout(timer);}
-}
-
-function buildEligibleSlots(catalog:Catalog,ctx:ReturnType<typeof buildContext>):EligibleSlot[]{
-  const out:EligibleSlot[]=[];
-  for(let d=0;d<7;d++){
-    for(const service of ["breakfast","lunch","dinner"] as MainService[]){
-      out.push({weekday:d,service,component:"main",ids:catalog.recipes.filter(r=>r.active&&!!r.primary_protein_id&&!r.services.includes("salad")&&!blockingReason(r,service,d as Weekday,ctx)).map(r=>r.id)});
-    }
-    if(d<6)out.push({weekday:d,service:"lunch",component:"soup",ids:catalog.recipes.filter(r=>r.active&&!blockingReason(r,"soup",d as Weekday,ctx)).map(r=>r.id)});
-  }
-  return out;
 }
