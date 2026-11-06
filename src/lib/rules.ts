@@ -67,17 +67,21 @@ export function cycleDistance(dayA: Weekday, dayB: Weekday, arrival: Weekday): n
 
 /**
  * Proyecta un weekday del menú maestro (recepción `source`) al calendario de otra recepción.
- * Conserva la posición del ciclo (Día 1..7) y solo intercambia el bloque del domingo,
- * igual que projectSharedItems: el domingo siempre queda en domingo.
+ * El domingo siempre queda en domingo. Los otros seis días conservan el orden del ciclo del
+ * maestro y solo se recorren para dejar libre la posición del domingo en la recepción destino.
+ * Ej.: maestro con recepción martes (Día 1..4, domingo, Día 6, Día 7) proyectado a recepción
+ * jueves queda vie=Día 1, sáb=Día 2, dom=domingo, lun=Día 3, mar=Día 4, mié=Día 6, jue=Día 7.
+ * Entre martes y miércoles el resultado es el mismo que intercambiar el bloque del domingo,
+ * porque ahí el domingo solo se mueve una posición. El resultado no depende de qué
+ * campamento sirve de maestro.
  */
 export function projectWeekday(day: Weekday, source: Weekday, target: Weekday): Weekday {
-  if (source === target) return day;
+  if (source === target || day === 6) return day;
   const sourcePos = cyclePosition(day, source);
   const sourceSunday = cyclePosition(6, source);
   const targetSunday = cyclePosition(6, target);
-  let targetPos = sourcePos;
-  if (sourcePos === sourceSunday) targetPos = targetSunday;
-  else if (sourcePos === targetSunday) targetPos = sourceSunday;
+  const rank = sourcePos < sourceSunday ? sourcePos : sourcePos - 1;
+  const targetPos = rank < targetSunday ? rank : rank + 1;
   return (((target + targetPos) % 7) as Weekday);
 }
 
