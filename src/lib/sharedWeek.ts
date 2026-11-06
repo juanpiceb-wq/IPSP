@@ -16,9 +16,8 @@ export function operationalDays(year:number, week:number, arrival:Weekday):Opera
 
 /**
  * Proyecta un menú maestro de un calendario de recepción a otro.
- * La secuencia Día 1..7 se conserva, salvo que el bloque dominical se intercambia
- * con la posición que corresponda para que el menú especial de domingo permanezca
- * SIEMPRE en el domingo calendario.
+ * El menú especial de domingo permanece SIEMPRE en el domingo calendario y los demás
+ * días conservan el orden del ciclo del maestro (ver projectWeekday).
  */
 export function projectSharedItems(items:MenuItem[],sourceArrival:Weekday,targetArrival:Weekday):MenuItem[]{
   if(sourceArrival===targetArrival)return items.map(i=>({...i}));
