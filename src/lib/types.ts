@@ -98,7 +98,9 @@ export interface Recipe {
   only_weekday?: Weekday | null;
 }
 
-export interface Zone { id:string; name:string; notes?:string|null; active:boolean; }
+/** Megazona del organigrama de producción (agrupa zonas; cada una tiene un Gerente Zonal). */
+export interface Megazone { id:string; name:string; color?:string|null; manager?:string|null; notes?:string|null; sort_order:number; active:boolean; }
+export interface Zone { id:string; name:string; notes?:string|null; megazone_id?:string|null; active:boolean; }
 export interface Camp {
   id:string; name:string; diners_default:number; reception_weekday_default:Weekday;
   delivery_notes?:string|null; notes?:string|null; zone_id?:string|null; active:boolean;
@@ -137,7 +139,7 @@ export interface WeeklyMenu {
 }
 
 export interface MasterIngredient { id:string; name:string; group:string; restrictive:boolean; availability:ProductParity; use_in_menu:boolean; note:string|null; }
-export interface Catalog { proteins:Protein[]; products:RestrictiveProduct[]; recipes:Recipe[]; camps:Camp[]; zones:Zone[]; ingredients:MasterIngredient[]; }
+export interface Catalog { proteins:Protein[]; products:RestrictiveProduct[]; recipes:Recipe[]; camps:Camp[]; zones:Zone[]; megazones:Megazone[]; ingredients:MasterIngredient[]; }
 export type IssueLevel = "ok" | "warn" | "error";
 export interface ValidationIssue { level:IssueLevel; rule:string; message:string; weekday?:Weekday; service?:MainService; }
 export interface MenuMetrics {

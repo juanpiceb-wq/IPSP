@@ -4,6 +4,7 @@ import type {
   Camp,
   Catalog,
   Zone,
+  Megazone,
   MasterIngredient,
   MenuStatus,
   Protein,
@@ -20,6 +21,7 @@ interface Store {
   recipes: Recipe[];
   camps: Camp[];
   zones: Zone[];
+  megazones: Megazone[];
   menus: WeeklyMenu[];
 }
 
@@ -37,6 +39,7 @@ function store(): Store {
       recipes: clone(RECIPES),
       camps: clone(currentCampOverrides(CAMPS)),
       zones: [],
+      megazones: [],
       menus: clone(historicalMenus()),
     };
   }
@@ -59,6 +62,7 @@ export class MemoryRepo implements Repo {
       recipes: s.recipes,
       camps: s.camps,
       zones: s.zones,
+      megazones: [...(s.megazones ?? [])].sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name)),
       ingredients: s.ingredients,
     });
   }
@@ -140,5 +144,19 @@ export class MemoryRepo implements Repo {
     const s = store();
     s.camps = s.camps.map((c) => c.zone_id === id ? { ...c, zone_id: null } : c);
     s.zones = s.zones.filter((z) => z.id !== id);
+  }
+
+  async upsertMegazone(megazone: Megazone) {
+    const s = store();
+    s.megazones ??= [];
+    const i = s.megazones.findIndex((m) => m.id === megazone.id);
+    if (i >= 0) s.megazones[i] = clone(megazone);
+    else s.megazones.push(clone(megazone));
+  }
+
+  async deleteMegazone(id: string) {
+    const s = store();
+    s.zones = s.zones.map((z) => z.megazone_id === id ? { ...z, megazone_id: null } : z);
+    s.megazones = (s.megazones ?? []).filter((m) => m.id !== id);
   }
 }
