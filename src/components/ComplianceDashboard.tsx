@@ -17,7 +17,7 @@ export default function ComplianceDashboard({ catalog, menus }: { catalog: Catal
   return <section className="surface p-5">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><h2 className="text-lg font-semibold text-navy-900">Cumplimiento del servicio</h2><p className="mt-1 text-sm text-muted">Seguimiento de lo planificado vs. lo ejecutado en cada cocina.</p></div>
-      <select className="input w-auto min-w-[260px]" value={scope} onChange={e=>setScope(e.target.value)}><option value="all">Vista general · todos los campamentos</option>{catalog.zones.filter(z=>z.active).map(z=><option key={z.id} value={`zone:${z.id}`}>Zona · {z.name}</option>)}{catalog.camps.filter(c=>c.active).map(c=><option key={c.id} value={`camp:${c.id}`}>Campamento · {c.name}</option>)}</select>
+      <select className="input w-auto min-w-[260px]" value={scope} onChange={e=>setScope(e.target.value)}><option value="all">Vista general · todos los campamentos</option>{catalog.zones.filter(z=>z.active&&catalog.camps.some(c=>c.active&&c.zone_id===z.id)).map(z=><option key={z.id} value={`zone:${z.id}`}>Zona · {z.name}</option>)}{catalog.camps.filter(c=>c.active).map(c=><option key={c.id} value={`camp:${c.id}`}>Campamento · {c.name}</option>)}</select>
     </div>
 
     <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

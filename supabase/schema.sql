@@ -4,10 +4,21 @@
 -- =====================================================================
 
 
+create table if not exists megazones (
+  id         text primary key,
+  name       text not null,
+  color      text,
+  manager    text,
+  notes      text,
+  sort_order integer not null default 0,
+  active     boolean not null default true
+);
+
 create table if not exists zones (
   id text primary key,
   name text not null,
   notes text,
+  megazone_id text references megazones(id) on delete set null,
   active boolean not null default true
 );
 
@@ -149,7 +160,7 @@ do $$
 declare t text;
 begin
   foreach t in array array[
-    'zones','camps','proteins','restrictive_products','camp_product_availability','ingredients',
+    'megazones','zones','camps','proteins','restrictive_products','camp_product_availability','ingredients',
     'recipes','recipe_services','recipe_restrictive_products','weekly_menus','menu_items'
   ] loop
     execute format('alter table %I enable row level security', t);

@@ -2,6 +2,7 @@ import type {
   Camp,
   Catalog,
   Zone,
+  Megazone,
   MenuStatus,
   Protein,
   Recipe,
@@ -31,6 +32,8 @@ export interface Repo {
   deleteCamp(id: string): Promise<void>;
   upsertZone(zone: Zone): Promise<void>;
   deleteZone(id: string): Promise<void>;
+  upsertMegazone(megazone: Megazone): Promise<void>;
+  deleteMegazone(id: string): Promise<void>;
 }
 
 export function newId(prefix: string) {

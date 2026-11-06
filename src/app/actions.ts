@@ -9,7 +9,7 @@ import { projectSharedItems } from "@/lib/sharedWeek";
 import { cycleDates } from "@/lib/dates";
 import { parityOfWeek, RULES } from "@/lib/rules";
 import { assertCanManageExecution, assertGeneralAdmin } from "@/lib/access";
-import type { Camp, ExecutionStatus, MenuItem, MenuStatus, Protein, Recipe, RestrictiveProduct, Weekday, WeeklyMenu, Zone } from "@/lib/types";
+import type { Camp, ExecutionStatus, MenuItem, MenuStatus, Protein, Recipe, RestrictiveProduct, Weekday, WeeklyMenu, Zone, Megazone } from "@/lib/types";
 
 export interface GenerateRequest { year:number; week:number; campId:string; diners:number; arrival:Weekday; locked?:MenuItem[]; seed?:string; }
 export interface GenerateResponse {
@@ -153,6 +153,8 @@ export async function actionSaveCamp(camp:Camp&{isNew?:boolean}){const repo=getR
 export async function actionDeleteCamp(id:string){assertGeneralAdmin();const repo=getRepo();const menus=await repo.listMenus({campId:id});if(menus.length)throw new Error("No se puede eliminar un campamento con menús históricos. Desactívelo para conservar trazabilidad.");await repo.deleteCamp(id);revalidatePath("/campamentos");revalidatePath("/generar");}
 export async function actionSaveZone(zone:Zone&{isNew?:boolean}){const repo=getRepo();const id=zone.isNew||!zone.id?uniqueId(slugify(zone.name)):zone.id;const {isNew,...rest}=zone;await repo.upsertZone({...rest,id});revalidatePath("/campamentos");revalidatePath("/generar");revalidatePath("/");return id;}
 export async function actionDeleteZone(id:string){assertGeneralAdmin();await getRepo().deleteZone(id);revalidatePath("/campamentos");revalidatePath("/generar");revalidatePath("/");}
+export async function actionSaveMegazone(megazone:Megazone&{isNew?:boolean}){const repo=getRepo();const id=megazone.isNew||!megazone.id?uniqueId(slugify(megazone.name)):megazone.id;const {isNew,...rest}=megazone;await repo.upsertMegazone({...rest,id});revalidatePath("/campamentos");return id;}
+export async function actionDeleteMegazone(id:string){assertGeneralAdmin();await getRepo().deleteMegazone(id);revalidatePath("/campamentos");}
 
 function shiftWeekday(day:Weekday,delta:number):Weekday{return(((day+delta)%7+7)%7) as Weekday;}
 function weekdayShift(baseArrival:Weekday,targetArrival:Weekday){let delta=targetArrival-baseArrival;if(delta>3)delta-=7;if(delta< -3)delta+=7;return delta;}

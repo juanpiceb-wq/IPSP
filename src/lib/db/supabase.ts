@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
-import type { Camp, Catalog, Zone, MasterIngredient, MenuItem, MenuStatus, Protein, Recipe, RestrictiveProduct, Service, WeeklyMenu } from "../types";
+import type { Camp, Catalog, Megazone, Zone, MasterIngredient, MenuItem, MenuStatus, Protein, Recipe, RestrictiveProduct, Service, WeeklyMenu } from "../types";
 import type { MenuFilters, Repo } from "./repo";
 
 export class SupabaseRepo implements Repo {
@@ -8,7 +8,7 @@ export class SupabaseRepo implements Repo {
   constructor(url:string,key:string){this.db=createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}});}
 
   async getCatalog():Promise<Catalog>{
-    const [proteins,products,recipes,services,restr,camps,zones,ingredients]=await Promise.all([
+    const [proteins,products,recipes,services,restr,camps,zones,ingredients,megazones]=await Promise.all([
       this.db.from("proteins").select("*").order("name"),
       this.db.from("restrictive_products").select("*").order("name"),
       this.db.from("recipes").select("*").order("name"),
@@ -17,6 +17,7 @@ export class SupabaseRepo implements Repo {
       this.db.from("camps").select("*").order("name"),
       this.db.from("zones").select("*").order("name"),
       this.db.from("ingredients").select("*").order("group").order("name"),
+      this.db.from("megazones").select("*").order("sort_order").order("name"),
     ]);
     throwIf(proteins.error??products.error??recipes.error??services.error??restr.error??camps.error??zones.error??ingredients.error);
     const servicesByRecipe=new Map<string,Service[]>();
@@ -24,7 +25,7 @@ export class SupabaseRepo implements Repo {
     const restrByRecipe=new Map<string,string[]>();
     for(const row of restr.data??[]){const arr=restrByRecipe.get(row.recipe_id)??[];arr.push(row.restrictive_product_id);restrByRecipe.set(row.recipe_id,arr);}
     return{
-      proteins:(proteins.data??[]) as Protein[],products:(products.data??[]) as RestrictiveProduct[],camps:(camps.data??[]) as Camp[],zones:(zones.data??[]) as Zone[],ingredients:(ingredients.data??[]) as MasterIngredient[],
+      proteins:(proteins.data??[]) as Protein[],products:(products.data??[]) as RestrictiveProduct[],camps:(camps.data??[]) as Camp[],zones:(zones.data??[]) as Zone[],megazones:megazones.error?[]:(megazones.data??[]) as Megazone[],ingredients:(ingredients.data??[]) as MasterIngredient[],
       recipes:(recipes.data??[]).map(r=>({id:r.id,name:r.name,primary_protein_id:r.primary_protein_id,active:r.active,source:r.source,notes:r.notes,main_ingredients:Array.isArray(r.main_ingredients)?r.main_ingredients.map(String):[],salad_policy:r.salad_policy??null,services:servicesByRecipe.get(r.id)??[],restrictive_product_ids:restrByRecipe.get(r.id)??[],base_ingredient:r.base_ingredient??null,difficulty:(r.difficulty??1) as Recipe["difficulty"],cooking_method:r.cooking_method??null,double_fry:Boolean(r.double_fry),sunday_roast:Boolean(r.sunday_roast),base_qty_per_person:r.base_qty_per_person==null?null:Number(r.base_qty_per_person),base_unit:r.base_unit??null,protein_qty_per_person:r.protein_qty_per_person==null?null:Number(r.protein_qty_per_person),protein_unit:r.protein_unit??null,rice_mode:(r.rice_mode??"default") as Recipe["rice_mode"],fixed_weekday:r.fixed_weekday==null?null:Number(r.fixed_weekday) as Recipe["fixed_weekday"],fixed_service:(r.fixed_service??null) as Recipe["fixed_service"],only_weekday:r.only_weekday==null?null:Number(r.only_weekday) as Recipe["only_weekday"]})),
     };
   }
@@ -70,6 +71,8 @@ export class SupabaseRepo implements Repo {
   async deleteCamp(id:string){const {error}=await this.db.from("camps").delete().eq("id",id);throwIf(error);}
   async upsertZone(zone:Zone){const {error}=await this.db.from("zones").upsert(zone);throwIf(error);}
   async deleteZone(id:string){const {error:e1}=await this.db.from("camps").update({zone_id:null}).eq("zone_id",id);throwIf(e1);const {error}=await this.db.from("zones").delete().eq("id",id);throwIf(error);}
+  async upsertMegazone(megazone:Megazone){const {error}=await this.db.from("megazones").upsert(megazone);throwIf(error);}
+  async deleteMegazone(id:string){const {error:e1}=await this.db.from("zones").update({megazone_id:null}).eq("megazone_id",id);throwIf(e1);const {error}=await this.db.from("megazones").delete().eq("id",id);throwIf(error);}
 }
 
 function rowToItem(row:Record<string,unknown>):MenuItem{return{weekday:row.weekday as MenuItem["weekday"],service:row.service as MenuItem["service"],component:row.component as MenuItem["component"],recipe_id:(row.recipe_id as string)??null,protein_id:(row.protein_id as string)??null,salad_recipe_id:(row.salad_recipe_id as string)??null,beverage:(row.beverage as string)??null,locked:Boolean(row.locked),reasons:(row.reasons as string[])??[],execution_status:(row.execution_status as MenuItem["execution_status"])??"pending",replacement_name:(row.replacement_name as string)??null,salad_execution_status:(row.salad_execution_status as MenuItem["salad_execution_status"])??"pending",beverage_execution_status:(row.beverage_execution_status as MenuItem["beverage_execution_status"])??"pending"};}

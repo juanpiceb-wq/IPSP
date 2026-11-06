@@ -43,7 +43,8 @@ export default function GeneratorClient({ catalog, lastUsed, defaults, history }
   const parity = parityOfWeek(week);
   const activeCamps = catalog.camps.filter(c=>c.active);
   const camp = scope === "camp" ? activeCamps.find(c=>c.id===campId) : undefined;
-  const activeZones = catalog.zones.filter(z=>z.active);
+  // Solo zonas con al menos un campamento activo: las zonas con campamentos aún inactivos no se pueden planificar.
+  const activeZones = catalog.zones.filter(z=>z.active && activeCamps.some(c=>c.zone_id===z.id));
   const selectedZones = zoneIds.map(id=>activeZones.find(z=>z.id===id)).filter(Boolean) as typeof activeZones;
   const zoneCampMap = new Map(activeZones.map(z=>[z.id,activeCamps.filter(c=>c.zone_id===z.id)]));
   const selectedMultiCamps = campIdsSelected.map(id=>activeCamps.find(c=>c.id===id)).filter(Boolean) as typeof activeCamps;
